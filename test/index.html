@@ -253,6 +253,20 @@ table.hgrid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
 .pushon{display:flex;align-items:center;gap:12px;background:#FFF7EE;border:1px solid #F6D3B0}
 .item.buy.done{opacity:.75}
 .st-do-kupienia{background:#FCE4CC;color:#8A4100}.st-zamówione{background:#DDEBF7;color:#1F4E79}.st-kupione{background:#DCF0E3;color:#1E6B3B}
+/* harmonogram: zmiany do zatwierdzenia (szkic administratora) */
+.drfbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1.5px dashed var(--orange);background:#FFF8F0}
+.drfbar>.grow{flex:1 1 240px;min-width:0}
+.hgrid td.drf{outline:2px dashed var(--orange);outline-offset:-3px;background:#FFF8F0}
+.ent.drf{background:#FFF8F0;border-left:3px solid var(--orange);padding-left:6px;margin-left:-6px;border-radius:4px}
+div.drf{color:var(--text)}
+.chip.c-del{background:#EEE;color:#888;text-decoration:line-through}
+.pill.drfp{background:#FFE9D2;color:#8A4100;font-size:11px;padding:1px 7px}
+.drg{border-top:1px solid var(--line);padding:8px 0}
+.drow{display:flex;gap:8px;align-items:center;padding:4px 0;font-size:14px}
+.drow .dd{min-width:70px;color:var(--muted);white-space:nowrap}
+.drow s{color:var(--muted)}
+.day.hl,.hgrid tr.hl td{animation:hlpulse 2.4s ease-out 1}
+@keyframes hlpulse{0%,40%{box-shadow:inset 0 0 0 3px var(--orange)}100%{box-shadow:none}}
 </style>
 
 </head>
@@ -513,7 +527,9 @@ function adopt(res) {
 var Q = { running: false, fail: 0 };
 var OP_LABEL = { sched: 'Harmonogram', job: 'Zlecenie', lead: 'Lead', contact: 'Kontakt', tojob: 'Zlecenie z leada', diary: 'Wpis',
                  ddel: 'Usuwanie wpisu', psend: 'Wiadomość Pumble', chk_add: 'Lista do zabrania', chk_tog: 'Lista do zabrania',
-                 chk_del: 'Lista do zabrania', buy_add: 'Zakupy', buy_set: 'Zakupy', buy_del: 'Zakupy', ntf: 'Powiadomienie' };
+                 chk_del: 'Lista do zabrania', buy_add: 'Zakupy', buy_set: 'Zakupy', buy_del: 'Zakupy', ntf: 'Powiadomienie',
+                 sappr: 'Zatwierdzanie harmonogramu', sdisc: 'Harmonogram' };
+var SCHED_OPS = { sched: 1, sappr: 1, sdisc: 1 };
 /** Po zapisie nowej pozycji: tymczasowy numer w kolejnych zapisach z kolejki zamieniony na prawdziwy. */
 function remapOutbox(tmp, real) {
   if (!tmp || tmp === real) return;
@@ -567,7 +583,9 @@ function opCall(op, fn, args, sub) { return api('apiOp', op.id + (sub || ''), fn
 /** Zmiana od razu widoczna w aplikacji (zanim serwer potwierdzi). Wywoływana też po wczytaniu świeżych danych. */
 function applyOp(op) {
   var p = op.p;
-  if (op.type === 'sched') { schedApply(p); calcJobDays(S.jobs); S._jm = null; }
+  if (op.type === 'sched') schedApply(p);
+  else if (op.type === 'sappr') { schedApproveLocal(p.items); calcJobDays(S.jobs); S._jm = null; }
+  else if (op.type === 'sdisc') schedDiscardLocal(p.keys);
   else if (op.type === 'job') jobApply(p.job, p.tmpId);
   else if (op.type === 'lead') leadApply(p.lead, p.tmpId);
   else if (op.type === 'contact') contactApply(p);
@@ -603,10 +621,14 @@ function sendOp(op) {
     saveOutbox();
   }
   if (p.fs && FS.on && FS_TYPES[op.type] && op.type !== 'diary') return fsOp(op);
-  if (op.type === 'sched') return opCall(op, 'apiScheduleSet', [p]).then(function (r) {
+  if (op.type === 'sched') return opCall(op, 'apiScheduleSet', [p]).then(function (r) { schedAdopt(op, r); adopt(r); });
+  if (op.type === 'sappr') return opCall(op, 'apiSchedApprove', [p.items]).then(function (r) {
     if (r && r.days) { var m = dayMap(); r.days.forEach(function (d) { var x = m[d.d]; if (x) { x.cells = d.cells; x.uw = d.uw; } }); }
-    calcJobDays(S.jobs); S._jm = null; adopt(r);
+    schedAdopt(op, r); calcJobDays(S.jobs); S._jm = null;
+    if (r && !r.dup) toast(approvedMsg(r));
+    adopt(r);
   });
+  if (op.type === 'sdisc') return opCall(op, 'apiSchedDiscard', [p.keys]).then(function (r) { schedAdopt(op, r); adopt(r); });
   if (op.type === 'job') return opCall(op, 'apiJobSave', [p.job]).then(function (r) { if (r && r.job) putRecord('jobs', p.tmpId || r.id, r.job, 'zl'); adopt(r); });
   if (op.type === 'lead') return opCall(op, 'apiLeadSave', [p.lead]).then(function (r) { if (r && r.lead) putRecord('leads', p.tmpId || r.id, r.lead, 'ld'); adopt(r); });
   if (op.type === 'contact') return opCall(op, 'apiLeadContact', [p.id, p.note, p.next]).then(function (r) {
@@ -950,16 +972,68 @@ function contactApply(p) {
   l.ostatni = S.today; l.notatka = '';
   S.hist[p.id] = [e].concat(S.hist[p.id] || []);
 }
+// Zmiany w harmonogramie (administrator) są szkicem: S.schedule.drafts = [{k: 'dzień|kolumna', d, c, o (jest), n (będzie), by}].
+// Pracownicy widzą tylko zatwierdzony harmonogram; po zatwierdzeniu osoby ze zmienionymi dniami dostają push.
+function schedCur(d, c) { return c === 13 ? (d.uw || '') : (d.cells[c] || ''); }
+function drafts() { return (S.schedule && S.schedule.drafts) || []; }
+function draftMap() { var m = {}; drafts().forEach(function (x) { m[x.k] = x; }); return m; }
+/** Wartość komórki do pokazania adminowi: szkic (gdy jest) albo zatwierdzony wpis. */
+function cellOf(d, c, dmap) {
+  var cur = schedCur(d, c), x = dmap && dmap[d.d + '|' + c];
+  return x ? { t: x.n, o: cur, dr: x } : { t: cur, o: cur, dr: null };
+}
+function schedPrune() {
+  var dm = dayMap();
+  S.schedule.drafts = drafts().filter(function (x) { var d = dm[x.d]; if (d) x.o = schedCur(d, x.c); return d && x.o !== x.n; })
+    .sort(function (a, b) { return a.d < b.d ? -1 : (a.d > b.d ? 1 : a.c - b.c); });
+}
 function schedApply(p) {
+  var list = drafts().slice(), m = {};
+  list.forEach(function (x) { m[x.k] = x; });
   (S.schedule.days || []).forEach(function (d) {
     if (d.d < p.from || d.d > p.to) return;
     if (p.workdaysOnly && p.from !== p.to && d.wd !== 1) return;
     p.cols.forEach(function (c) {
-      if (c === 13) d.uw = p.text;
-      else if (p.text) d.cells[c] = p.text;
-      else delete d.cells[c];
+      var k = d.d + '|' + c, x = m[k];
+      if (!x) { x = m[k] = { k: k, d: d.d, c: c }; list.push(x); }
+      x.n = p.text; x.by = S.user.name;
     });
   });
+  S.schedule.drafts = list;
+  schedPrune();
+}
+function schedApproveLocal(items) {
+  var want = {}, dm = dayMap();
+  (items || []).forEach(function (x) { want[x.k] = x.n; });
+  S.schedule.drafts = drafts().filter(function (x) {
+    if (!(x.k in want) || want[x.k] !== x.n) return true;
+    var d = dm[x.d];
+    if (d) { if (x.c === 13) d.uw = x.n; else if (x.n) d.cells[x.c] = x.n; else delete d.cells[x.c]; }
+    return false;
+  });
+}
+function schedDiscardLocal(keys) {
+  var set = {};
+  (keys || []).forEach(function (k) { set[k] = 1; });
+  S.schedule.drafts = drafts().filter(function (x) { return !set[x.k]; });
+}
+/** Odpowiedź serwera: jego lista zmian + zmiany z kolejki, które jeszcze nie doszły. */
+function schedAdopt(op, r) {
+  if (!r || !r.drafts) return;
+  S.schedule.drafts = r.drafts;
+  S.outbox.forEach(function (o) { if (o !== op && SCHED_OPS[o.type]) applyOp(o); });
+}
+function approvedMsg(r) {
+  var n = r.approved || 0;
+  if (!n) return 'Nic do zatwierdzenia – zmiany są już w harmonogramie.';
+  return 'Zatwierdzono ' + n + ' ' + plural(n, 'zmianę', 'zmiany', 'zmian') + '.' +
+    (r.notified && r.notified.length ? ' Powiadomienie: ' + r.notified.join(', ') + '.' : '') +
+    (r.noUser && r.noUser.length ? ' Bez konta w aplikacji: ' + r.noUser.join(', ') + '.' : '');
+}
+function plural(n, one, few, many) {
+  if (n === 1) return one;
+  var d = n % 10, dd = n % 100;
+  return d >= 2 && d <= 4 && !(dd >= 12 && dd <= 14) ? few : many;
 }
 /** Dni w harmonogramie, Od, Do – tak jak formuły w arkuszu (wpis zawiera hasło, liczone osobodni). */
 function calcJobDays(jobs) {
@@ -1028,18 +1102,22 @@ function navReplace(route) {
 }
 function go(route, noPush) {
   if (S.sheetOpen) closeSheet();
-  var toHarm = route === 'harm' && S.route.split('/')[0] !== 'harm';
+  var hd = /^harm\/(\d{4}-\d{2}-\d{2})$/.exec(route || '');          // z powiadomienia: harmonogram na konkretny dzień
+  if (hd) { route = 'harm'; S.week = monday(hd[1]); S.mon = monthStart(hd[1]); S.hlDay = hd[1]; }
+  var toHarm = !hd && route === 'harm' && S.route.split('/')[0] !== 'harm';
   if (toHarm) { S.week = monday(S.today); S.mon = monthStart(S.today); }   // harmonogram: bieżący tydzień (miesiąc)…
   S.route = route;
   if (!noPush) navPush(route);
   render();
   window.scrollTo(0, 0);
   if (toHarm) scrollToToday();                                   // …przewinięty do dzisiejszego dnia
+  else if (hd) scrollToDay(hd[1]);
 }
 /** Przewija harmonogram tak, żeby dzisiejszy dzień był u góry ekranu (pod paskiem tytułu). */
-function scrollToToday() {
+function scrollToToday() { scrollToDay(null); }
+function scrollToDay(ds) {
   setTimeout(function () {
-    var el = document.querySelector('#view .day.today, #view tr.today');
+    var el = document.querySelector(ds ? '#view [data-day="' + ds + '"]' : '#view .day.today, #view tr.today');
     if (!el) return;
     var wrap = el.closest ? el.closest('.hgrid-wrap') : null;
     if (wrap) {                                                  // tabela na komputerze – przewija się sama tabela
@@ -1047,7 +1125,7 @@ function scrollToToday() {
       wrap.scrollTop = Math.max(0, el.offsetTop - (th ? th.offsetHeight : 0) - 60);
       if (harmRange().month) return;
     }
-    if (!harmRange().month && pd(S.today).getDay() === 1) return;   // tydzień od poniedziałku – i tak na górze
+    if (!harmRange().month && pd(ds || S.today).getDay() === 1) return;   // tydzień od poniedziałku – i tak na górze
     var r = el.getBoundingClientRect(), top = $('top') ? $('top').offsetHeight : 0;
     var tabs = $('tabs') && $('tabs').offsetHeight || 0;
     if (r.bottom <= window.innerHeight - tabs && r.top >= top) return;   // już widać w całości
@@ -1166,26 +1244,88 @@ function renderHarm() {
   h += '</div>';
   if (S.schedule.from && (to < S.schedule.from || from > S.schedule.to))
     h += '<div class="card small muted">Harmonogram w arkuszu obejmuje ' + fd(S.schedule.from) + ' – ' + fd(S.schedule.to) + '.</div>';
+  if (isAdmin()) h += draftBar();
   var dm = dayMap(), persons = S.schedule.persons.filter(function (p) { return !S.onlyMe || p.c === mc; });
-  if (midW()) h += harmGrid(from, len, dm, persons); else h += harmCards(from, len, dm, persons);
+  var dmap = isAdmin() ? draftMap() : null;
+  if (midW()) h += harmGrid(from, len, dm, persons, dmap); else h += harmCards(from, len, dm, persons, dmap);
   if (isAdmin()) h += '<p class="small muted" style="margin-top:10px">Kliknij komórkę, żeby wpisać zlecenie, urlop albo wolne ' +
-    '(można od razu na kilka dni i kilka osób).</p>';
+    '(można od razu na kilka dni i kilka osób). Zmiany są najpierw szkicem (obwódka) – pracownicy zobaczą je i dostaną ' +
+    'powiadomienie dopiero po „Zatwierdź”.</p>';
   $('view').innerHTML = h;
+  if (S.hlDay) { var hl = document.querySelector('#view [data-day="' + S.hlDay + '"]'); if (hl) hl.classList.add('hl'); S.hlDay = null; }
 }
-function harmGrid(from, len, dm, persons) {
+/** Pasek z niezatwierdzonymi zmianami (administrator). */
+function draftBar() {
+  var list = drafts();
+  if (!list.length) return '';
+  var who = {}, names = {}, n = list.length;
+  S.schedule.persons.forEach(function (p) { names[p.c] = p.name; });
+  list.forEach(function (x) { if (names[x.c]) who[names[x.c]] = 1; });
+  var w = Object.keys(who);
+  return '<div class="card drfbar"><div class="grow"><b>✏️ ' + n + ' ' + plural(n, 'zmiana', 'zmiany', 'zmian') + ' do zatwierdzenia</b>' +
+    (w.length ? '<div class="small">' + esc(w.join(', ')) + '</div>' : '') +
+    '<div class="tiny">Pracownicy jeszcze ich nie widzą.</div></div><div class="btns" style="margin:0">' +
+    '<button class="btn sm pri" data-act="sappr">✅ Zatwierdź i powiadom</button><button class="btn sm" data-act="sreview">Przejrzyj</button></div></div>';
+}
+function draftTxt(x) {
+  return (x.o ? '<s>' + esc(x.o) + '</s> → ' : '') + (x.n ? '<b>' + esc(x.n) + '</b>' : '<i>bez wpisu</i>');
+}
+/** Lista zmian do zatwierdzenia – po osobach; każdą można cofnąć. */
+function openSchedReview() {
+  var list = drafts();
+  if (!list.length) { closeSheet(); return; }
+  var names = { 13: 'Uwagi dnia' }, order = [], by = {};
+  S.schedule.persons.forEach(function (p) { names[p.c] = p.name; order.push(p.c); });
+  order.push(13);
+  list.forEach(function (x) { (by[x.c] = by[x.c] || []).push(x); });
+  var h = '<h3>Zmiany do zatwierdzenia <button class="ib btn sm" data-act="close">✕</button></h3>' +
+    '<p class="small muted" style="margin-top:0">Po zatwierdzeniu zmiany trafią do harmonogramu, a każda osoba dostanie powiadomienie ze swoimi dniami.</p>';
+  order.forEach(function (c) {
+    var g = by[c];
+    if (!g) return;
+    h += '<div class="drg"><div class="b">' + esc(names[c] || ('kolumna ' + c)) + ' <span class="small muted">(' + g.length + ')</span></div>' +
+      g.map(function (x) {
+        var dt = pd(x.d);
+        return '<div class="drow"><span class="dd">' + DOW[dt.getDay()] + ' ' + fds(x.d) + '</span><span class="grow">' + draftTxt(x) +
+          (x.by && x.by !== S.user.name ? ' <span class="tiny">(' + esc(x.by) + ')</span>' : '') +
+          '</span><button class="btn sm" data-act="sdisc1" data-k="' + esc(x.k) + '" title="Cofnij tę zmianę">↩</button></div>';
+      }).join('') + '</div>';
+  });
+  h += '<div class="btns"><button class="btn pri" data-act="sappr">✅ Zatwierdź i powiadom</button>' +
+    '<button class="btn danger" data-act="sdiscall">Odrzuć wszystkie</button><button class="btn" data-act="close">Zamknij</button></div>';
+  openSheet(h);
+}
+function schedApprove() {
+  var list = drafts();
+  if (!list.length) return;
+  if (S.sheetOpen) closeSheet();
+  enqueue('sappr', { items: list.map(function (x) { return { k: x.k, n: x.n }; }) });
+  render();
+  toast('Zatwierdzono – wysyłam powiadomienia…');
+}
+function schedDiscard(keys) {
+  enqueue('sdisc', { keys: keys });
+  if (S.sheetOpen) openSchedReview();
+  render();
+}
+function harmGrid(from, len, dm, persons, dmap) {
   var h = '<div class="hgrid-wrap"><table class="hgrid"><thead><tr><th class="d">Dzień</th>' +
     persons.map(function (p) { return '<th>' + esc(p.name) + '</th>'; }).join('') +
     (S.onlyMe ? '' : '<th>Uwagi</th>') + '</tr></thead><tbody>';
   for (var i = 0; i < len; i++) {
     var ds = addD(from, i), d = dm[ds] || { d: ds, cells: {}, wd: 1 }, dt = pd(ds);
     var cls = (d.wd === 0 ? 'we ' : '') + (d.wd === 2 ? 'hol ' : '') + (ds === S.today ? 'today ' : '') + (i > 0 && dt.getDay() === 1 ? 'wk' : '');
-    h += '<tr class="' + cls + '"><td class="d"><b>' + DOW[dt.getDay()] + '</b> ' + fds(ds) +
+    h += '<tr class="' + cls + '" data-day="' + ds + '"><td class="d"><b>' + DOW[dt.getDay()] + '</b> ' + fds(ds) +
       (d.info && d.wd === 2 ? '<div class="tiny">' + esc(d.info) + '</div>' : '') + '</td>';
     persons.forEach(function (p) {
-      var t = d.cells[p.c] || '';
-      h += '<td class="cell" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '">' + (t ? chipHtml(t, !isAdmin()) : '') + '</td>';
+      var v = cellOf(d, p.c, dmap), t = v.t;
+      h += '<td class="cell' + (v.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
+        (v.dr ? ' title="Do zatwierdzenia. Teraz: ' + esc(v.o || '(pusto)') + '"' : '') + '>' +
+        (t ? chipHtml(t, !isAdmin()) : (v.dr && v.o ? '<span class="chip c-del">' + esc(v.o) + '</span>' : '')) + '</td>';
     });
-    if (!S.onlyMe) h += '<td class="uw cell" data-act="hcell" data-d="' + ds + '" data-c="13">' + esc(d.uw || '') + '</td>';
+    if (!S.onlyMe) { var u = cellOf(d, 13, dmap);
+      h += '<td class="uw cell' + (u.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="13">' +
+        (u.t ? esc(u.t) : (u.dr && u.o ? '<s>' + esc(u.o) + '</s>' : '')) + '</td>'; }
     h += '</tr>';
   }
   return h + '</tbody></table></div>';
@@ -1198,39 +1338,43 @@ function chipHtml(t, link) {
     return '<span class="chip half ' + c.cls + '" style="' + c.style + '"' + (link && c.job ? ' data-go="zl/' + esc(c.job.id) + '"' : '') + '>½ ' + esc(pt) + '</span>';
   }).join(' ');
 }
-function harmCards(from, len, dm, persons) {
+function harmCards(from, len, dm, persons, dmap) {
   var h = '';
   for (var i = 0; i < len; i++) {
     var ds = addD(from, i), d = dm[ds] || { d: ds, cells: {}, wd: 1 }, dt = pd(ds);
     var groups = {}, order = [];
     persons.forEach(function (p) {
-      var t = d.cells[p.c];
+      var v = cellOf(d, p.c, dmap), t = v.t || (v.dr ? v.o : '');
       if (!t) return;
-      var k = norm(t);
-      if (!groups[k]) { groups[k] = { t: t, who: [], cols: [] }; order.push(k); }
+      var k = (v.dr ? (v.t ? '+' : '-') : '') + norm(t);             // szkic osobno od zatwierdzonych wpisów
+      if (!groups[k]) { groups[k] = { t: t, who: [], cols: [], dr: v.dr ? (v.t ? 'new' : 'del') : '' }; order.push(k); }
       groups[k].who.push(p.name); groups[k].cols.push(p.c);
     });
+    var uwv = cellOf(d, 13, dmap);
     var cls = 'day' + (d.wd === 0 ? ' we' : '') + (d.wd === 2 ? ' hol' : '') + (ds === S.today ? ' today' : '');
-    h += '<div class="' + cls + '"><div class="day-h"><span class="grow">' + DOWL[dt.getDay()] + ' ' + fds(ds) +
+    h += '<div class="' + cls + '" data-day="' + ds + '"><div class="day-h"><span class="grow">' + DOWL[dt.getDay()] + ' ' + fds(ds) +
       (ds === S.today ? ' <span class="pill" style="background:var(--orange);color:#fff">dziś</span>' : '') +
       (d.wd === 2 && d.info ? ' <span class="tiny">' + esc(d.info) + '</span>' : '') + '</span>' +
       (isAdmin() ? '<button class="btn sm" data-act="hcell" data-d="' + ds + '" data-c="">+</button>' : '') + '</div>';
-    if (!order.length && !d.uw) { h += (d.wd === 0 ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
+    if (!order.length && !uwv.t && !uwv.dr) { h += (d.wd === 0 ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
     h += '<div class="day-b">';
     order.forEach(function (k) {
-      var g = groups[k], js = cellJobs(g.t);
-      h += '<div class="ent" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' + chipHtml(g.t, !isAdmin()) +
-        '</span><span class="who grow">' + esc(g.who.join(', ')) +
+      var g = groups[k], js = g.dr === 'del' ? [] : cellJobs(g.t);
+      h += '<div class="ent' + (g.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' +
+        (g.dr === 'del' ? '<span class="chip c-del">' + esc(g.t) + '</span>' : chipHtml(g.t, !isAdmin())) +
+        '</span><span class="who grow">' + esc(g.who.join(', ')) + (g.dr ? ' <span class="pill drfp">' + (g.dr === 'del' ? 'usunięte – do zatw.' : 'do zatwierdzenia') + '</span>' : '') +
         js.map(function (j) { return '<br><span class="tiny">' + esc([j.klient, j.lok].filter(Boolean).join(' – ')) + '</span>'; }).join('') + '</span></div>';
     });
-    if (d.uw && !S.onlyMe) h += '<div class="small muted" style="padding-top:6px">📝 ' + esc(d.uw) + '</div>';
+    if ((uwv.t || uwv.dr) && !S.onlyMe) h += '<div class="small muted' + (uwv.dr ? ' drf' : '') + '" style="padding-top:6px"' +
+      (isAdmin() ? ' data-act="hcell" data-d="' + ds + '" data-c="13"' : '') + '>📝 ' + (uwv.t ? esc(uwv.t) : '<s>' + esc(uwv.o) + '</s>') +
+      (uwv.dr ? ' <span class="pill drfp">do zatwierdzenia</span>' : '') + '</div>';
     h += '</div></div>';
   }
   return h;
 }
 function harmCellClick(el) {
   var ds = el.getAttribute('data-d'), cs = el.getAttribute('data-c'), cols = cs ? cs.split(',').map(Number) : [];
-  var d = dayMap()[ds] || { cells: {} }, text = cols.length ? (cols[0] === 13 ? d.uw : d.cells[cols[0]]) || '' : '';
+  var d = dayMap()[ds] || { d: ds, cells: {} }, text = cols.length ? cellOf(d, cols[0], isAdmin() ? draftMap() : null).t || '' : '';
   var job = text ? matchJob(text) : null;
   if (!isAdmin()) { if (job) go('zl/' + job.id); return; }
   openSchedEdit(ds, cols, text, job);
@@ -1282,7 +1426,8 @@ function schedSave(clear) {
   closeSheet();
   enqueue('sched', { cols: cols, from: from, to: to, text: text, workdaysOnly: wdo });
   render();
-  toast((clear ? 'Wyczyszczono' : 'Zapisano') + ' (' + (n * cols.length) + ' ' + (n * cols.length === 1 ? 'komórka' : 'komórek') + ').');
+  var nd = drafts().length;
+  toast((clear ? 'Wyczyszczono' : 'Zapisano') + (nd ? '. Do zatwierdzenia: ' + nd + ' ' + plural(nd, 'zmiana', 'zmiany', 'zmian') + '.' : ' – bez zmian w harmonogramie.'));
 }
 
 // ------------------------------------------------------------------------------------------------ zlecenia
@@ -2280,6 +2425,10 @@ var ACT = {
   hcell: harmCellClick,
   scode: function (el) { $('s_text').value = el.getAttribute('data-v'); var s = $('s_job'); if (s) s.value = ''; },
   ssave: function () { schedSave(false); }, sclear: function () { schedSave(true); },
+  sreview: openSchedReview, sappr: schedApprove,
+  sdisc1: function (el) { schedDiscard([el.getAttribute('data-k')]); },
+  sdiscall: function () { ask('Odrzucić wszystkie niezatwierdzone zmiany w harmonogramie? Harmonogram zostanie taki jak teraz.', function () {
+    schedDiscard(drafts().map(function (x) { return x.k; })); }, 'danger'); },
   zltab: function (el) { S.zlTab = el.getAttribute('data-t'); S.q.zl = ''; renderJobs(S.route.split('/')[1]); },
   ldtab: function (el) { S.ldTab = el.getAttribute('data-t'); S.q.ld = ''; renderLeads(S.route.split('/')[1]); },
   newjob: function () { editJob(''); }, editjob: function (el) { editJob(el.getAttribute('data-id')); },
