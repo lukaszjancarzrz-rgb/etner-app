@@ -311,6 +311,15 @@ function monday(s) { var d = pd(s), w = (d.getDay() + 6) % 7; d.setDate(d.getDat
 function money(v) { if (v === '' || v === null || v === undefined) return ''; var n = +v; if (!isFinite(n)) return esc(v);
   return n.toLocaleString('pl-PL', { maximumFractionDigits: 2 }) + ' zł'; }
 function phone(s) { var m = String(s || '').match(/(\+?\d[\d\s\-]{7,}\d)/); return m ? m[1].replace(/[\s\-]/g, '') : ''; }
+var MAIL_RE = /[^\s,;<>()]+@[^\s,;<>()]+\.[a-z]{2,}/ig;
+/** Kontakt z arkusza (jedno pole) → telefon i e-mail osobno. tel = tekst bez adresów e-mail (żeby nic nie zginęło). */
+function splitContact(k) {
+  k = String(k || '');
+  var mails = k.match(MAIL_RE) || [];
+  var tel = k.replace(MAIL_RE, ' ').replace(/\s*[,;·|\/]\s*(?=[,;·|\/]|$)/g, '').replace(/^[\s,;·|\/]+|[\s,;·|\/]+$/g, '').replace(/\s{2,}/g, ' ');
+  return { tel: tel, mail: mails.join(', ') };
+}
+function joinContact(tel, mail) { return [String(tel || '').trim(), String(mail || '').trim()].filter(Boolean).join(', '); }
 function isAdmin() { return S.user && S.user.role === 'admin'; }
 function isAndroid() { return /Android/i.test(navigator.userAgent); }
 function isIOS() { return /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
@@ -337,14 +346,17 @@ function pumbleHref(ch) {
 }
 /** Karta: adres (nawigacja) i telefon (połączenie). */
 function contactHtml(o) {
-  var tel = phone(o.kontakt), adr = o.adres || o.lok, h = '';
+  var tel = phone(o.kontakt), adr = o.adres || o.lok, h = '', sc = splitContact(o.kontakt);
   if (!tel && !adr && !o.kontakt) return '';
   h += '<div class="contact">';
   if (adr) { var mt = mapTarget(adr);
     h += '<a class="crow" target="_blank" rel="noopener" href="' + esc(mt.href) + '"><span class="ci">' + (mt.link ? '📍' : '🧭') + '</span><span class="grow"><b>' + esc(mt.label) + '</b>' +
       (o.adres ? '' : '<span class="tiny muted"> (miejscowość – uzupełnij adres w edycji)</span>') + '<br><span class="tiny">Nawiguj w Mapach Google</span></span><span class="go">›</span></a>'; }
-  if (tel) h += '<a class="crow" href="tel:' + esc(tel) + '" target="_top"><span class="ci">📞</span><span class="grow"><b>' + esc(o.kontakt) + '</b><br><span class="tiny">Zadzwoń do klienta</span></span><span class="go">›</span></a>';
-  else if (o.kontakt) h += '<div class="crow"><span class="ci">✉️</span><span class="grow">' + esc(o.kontakt) + '</span></div>';
+  if (tel) h += '<a class="crow" href="tel:' + esc(tel) + '" target="_top"><span class="ci">📞</span><span class="grow"><b>' + esc(sc.tel || tel) + '</b><br><span class="tiny">Zadzwoń do klienta</span></span><span class="go">›</span></a>';
+  else if (sc.tel) h += '<div class="crow"><span class="ci">👤</span><span class="grow">' + esc(sc.tel) + '</span></div>';
+  if (sc.mail) sc.mail.split(', ').forEach(function (m) {
+    h += '<a class="crow" href="mailto:' + esc(m) + '" target="_top"><span class="ci">✉️</span><span class="grow"><b>' + esc(m) + '</b><br><span class="tiny">Napisz e-mail</span></span><span class="go">›</span></a>';
+  });
   return h + '</div>';
 }
 function stCls(s) { return 'st-' + slug(s); }
@@ -1740,6 +1752,7 @@ function drawLead(l) {
     '<span class="grow"></span>' + (l.status ? '<span class="pill ' + stCls(l.status) + '">' + esc(l.status) + '</span>' : '') + '</div><h2>' + esc(l.temat || l.klient) + '</h2>' +
     '<div class="meta" style="font-size:14px">' + nextTxt(l) + (l.ostatni ? '<span>ostatni kontakt: ' + fd(l.ostatni) + '</span>' : '') + '</div>' +
     '<div class="btns" style="margin-top:10px">' + (tel ? '<a class="btn sm" href="tel:' + esc(tel) + '" target="_top">📞 Zadzwoń</a>' : '') +
+    (splitContact(l.kontakt).mail ? '<a class="btn sm" href="mailto:' + esc(splitContact(l.kontakt).mail.split(', ')[0]) + '" target="_top">✉️ E-mail</a>' : '') +
     (l.ch ? '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(pumbleHref(l.ch)) + '">💬 Pumble</a>' : '') +
     (tmp ? '' : '<button class="btn sm" data-act="editlead" data-id="' + esc(l.id) + '">✏️ Edytuj</button>' +
     '<button class="btn sm acc" data-act="tojob" data-id="' + esc(l.id) + '">→ Utwórz zlecenie</button>') + '</div></div>';
@@ -1748,7 +1761,7 @@ function drawLead(l) {
     [['+3 dni', 3], ['+1 tydz.', 7], ['+2 tyg.', 14], ['+1 mies.', 30], ['+3 mies.', 91]].map(function (q) { return '<button type="button" data-act="cquick" data-n="' + q[1] + '">' + q[0] + '</button>'; }).join('') +
     '</div></div><button class="btn pri" data-act="csave" data-id="' + esc(l.id) + '">Zapisz kontakt</button>' +
     '<div class="tiny muted" style="margin-top:6px">Zapisze się w „Historii kontaktów” (jak ✓ w arkuszu). Termin minięty bez kontaktu = mail z przypomnieniem.</div></div>';
-  h += '<div class="card"><dl class="kv">' + kv('Klient', l.klient) + kv('Kontakt', l.kontakt) + kv('Skąd klient', l.skad) + kv('Opis', l.opis) +
+  h += '<div class="card"><dl class="kv">' + kv('Klient', l.klient) + kv('Telefon', splitContact(l.kontakt).tel) + kv('E-mail', splitContact(l.kontakt).mail) + kv('Skąd klient', l.skad) + kv('Opis', l.opis) +
     (l.wartosc !== '' && l.wartosc !== undefined ? '<dt>Wartość wyceny</dt><dd>' + money(l.wartosc) + ' netto</dd>' : '') + kv('Data dodania', fd(l.dodano)) + kv('Uwagi', l.uwagi) +
     (l.arch && l.zamk ? kv('Zamknięto', fd(l.zamk)) : '') + (!(l.klient || l.kontakt || l.skad || l.opis || (l.wartosc !== '' && l.wartosc !== undefined) || l.dodano || l.uwagi) ? '<dd class="small muted" style="grid-column:1/-1">Brak szczegółów – uzupełnij przez „Edytuj”.</dd>' : '') + '</dl>' +
     (jobs.length ? '<p class="small" style="margin-bottom:0">Zlecenia: ' + jobs.map(function (z) { return '<button class="link" data-go="zl/' + esc(z.id) + '">' + esc(z._tmp ? 'nowe' : z.id) + '</button>'; }).join(', ') + '</p>' : '') + '</div>';
@@ -1770,7 +1783,7 @@ function leadForm(l, title) {
     fld('Temat / lokalizacja', inp('l_temat', l.temat, 'np. Jordanów – reku')) +
     '<div class="two">' + fld('Kategoria', sel('l_kat', S.lists.kat, l.kat, true)) + fld('Status', sel('l_status', S.lists.statusL, l.status || S.lists.statusL[0])) + '</div>' +
     '<div class="two">' + fld('Klient', inp('l_klient', l.klient)) + fld('Skąd klient', sel('l_skad', S.lists.zrodla, l.skad, true)) + '</div>' +
-    fld('Kontakt (tel. / e-mail)', inp('l_kontakt', l.kontakt)) +
+    '<div class="two">' + fld('Telefon', inp('l_tel', splitContact(l.kontakt).tel, 'np. 600 100 200', 'tel')) + fld('E-mail', inp('l_mail', splitContact(l.kontakt).mail, 'np. jan@example.pl', 'email')) + '</div>' +
     fld('Opis / info', '<textarea id="l_opis">' + esc(l.opis || '') + '</textarea>') +
     '<div class="two">' + fld('Wartość wyceny netto (zł)', inp('l_wartosc', l.wartosc, '', 'text')) + fld('Następny kontakt', inp('l_next', l.nastepny, '', 'date')) + '</div>' +
     '<div class="two">' + fld('Data dodania', inp('l_dodano', l.dodano || S.today, '', 'date')) + '<div></div></div>' +
@@ -1784,7 +1797,7 @@ function editLead(id) {
 function saveLead(id) {
   var g = function (k) { var e = $(k); return e ? e.value : ''; };
   var l = { id: id || '', temat: g('l_temat'), kat: g('l_kat'), status: g('l_status'), klient: g('l_klient'), skad: g('l_skad'),
-            kontakt: g('l_kontakt'), opis: g('l_opis'), wartosc: g('l_wartosc'), nastepny: g('l_next'), dodano: g('l_dodano'), uwagi: g('l_uwagi') };
+            kontakt: joinContact(g('l_tel'), g('l_mail')), opis: g('l_opis'), wartosc: g('l_wartosc'), nastepny: g('l_next'), dodano: g('l_dodano'), uwagi: g('l_uwagi') };
   if (!l.temat.trim() && !l.klient.trim() && !l.opis.trim()) return toast('Wpisz co najmniej temat, klienta albo opis.', true);
   var tmpId = id ? null : 'tmp' + uid();
   closeSheet();
@@ -2170,7 +2183,8 @@ function renderSettings() {
   $('view').innerHTML = '<div class="card"><h3>💬 Pumble</h3><p class="small">' + (s.pumble ? '<span class="ok">● połączony</span>' : '○ niepołączony') + '</p>' +
     '<div class="fld"><label>Klucz API (w Pumble: po lewej <b>API</b> → <b>Add API key</b>, albo wpisz w czacie <code>/api-keys generate</code>)</label>' +
     '<input id="st_key" type="password" placeholder="' + (s.pumble ? '•••••• (zapisany – wpisz nowy, żeby zmienić)' : 'wklej klucz') + '"></div>' +
-    '<div class="checks" style="margin-bottom:12px"><label><input type="checkbox" id="st_notify"' + (s.notify ? ' checked' : '') + '> wysyłaj na kanał zlecenia powiadomienia (nowe wpisy, zmiana statusu)</label></div>' +
+    '<div class="checks" style="margin-bottom:12px"><label><input type="checkbox" id="st_notify"' + (s.notify ? ' checked' : '') + '> wysyłaj na kanał zlecenia powiadomienia (nowe wpisy, zmiana statusu)</label>' +
+    '<label><input type="checkbox" id="st_auto"' + (s.auto !== false ? ' checked' : '') + '> dla każdego nowego zlecenia twórz kanał i wysyłaj na niego wszystkie dane zlecenia (bez uwag)</label></div>' +
     '<div class="btns"><button class="btn pri" data-act="stsave">Zapisz i sprawdź</button>' + (s.pumble ? '<button class="btn danger" data-act="stunlink">Odłącz Pumble</button>' : '') + '</div></div>' +
     '<div class="card"><h3>🔔 Powiadomienia</h3><div class="fld"><label>Przypomnienie rano dla ekip o rzeczach do zabrania (gdy lista nie jest pusta)</label>' +
     '<input id="st_pushat" type="time" value="' + esc(s.pushAt || '07:00') + '" style="max-width:160px"></div><button class="btn" data-act="stpush">Zapisz godzinę</button></div>' +
@@ -2210,7 +2224,7 @@ function fbSave(off) {
 }
 function settingsSave(what) {
   var d = {};
-  if (what === 'pumble') { var k = $('st_key').value.trim(); if (k) d.pumbleKey = k; d.notify = $('st_notify').checked; }
+  if (what === 'pumble') { var k = $('st_key').value.trim(); if (k) d.pumbleKey = k; d.notify = $('st_notify').checked; d.auto = $('st_auto').checked; }
   if (what === 'unlink') d.pumbleKey = '';
   if (what === 'url') { d.appUrl = $('st_url').value.trim(); d.pwaUrl = $('st_pwa').value.trim(); }
   if (what === 'push') d.pushAt = $('st_pushat').value;
