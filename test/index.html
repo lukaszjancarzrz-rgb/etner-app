@@ -226,6 +226,7 @@ table.hgrid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
 #tabs button .lb{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(9px,2.5vw,11.5px);letter-spacing:-.25px;padding:0 1px}
 #tabs button.on{color:var(--navy);font-weight:700}
 #tabs button.on .lb{letter-spacing:-.5px}
+#tabs button[data-go=harm]{flex:1.3}
 #tabs button.on .ic{background:#DCE6F5;box-shadow:inset 0 0 0 1.5px #B7C8E6}
 #tabs button.on::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;border-radius:0 0 3px 3px;background:var(--orange)}
 #tabs .dot{position:absolute;top:-3px;right:4px;min-width:17px;height:17px;border-radius:9px;background:var(--bad);color:#fff;font-size:10.5px;font-weight:700;line-height:17px;padding:0 4px;font-style:normal}
@@ -314,6 +315,17 @@ function isAdmin() { return S.user && S.user.role === 'admin'; }
 function isAndroid() { return /Android/i.test(navigator.userAgent); }
 function isIOS() { return /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
 function navUrl(adres) { return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(adres) + '&travelmode=driving'; }
+/** Adres albo wklejony link z Map Google / współrzędne → {href, link, label}. Z linku z pinezką (współrzędne) robi od razu trasę. */
+function mapTarget(a) {
+  a = String(a || '').trim();
+  var c = a.match(/^(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)$/);
+  if (c) return { href: navUrl(c[1] + ',' + c[2]), link: true, label: 'Pinezka ' + c[1] + ', ' + c[2] };
+  if (!/^https?:\/\/\S+$/i.test(a)) return { href: navUrl(a), link: false, label: a };
+  var name = '', m = a.match(/\/maps\/place\/([^\/@?]+)/);
+  if (m) { try { name = decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) { name = m[1].replace(/\+/g, ' '); } }
+  c = a.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || a.match(/[?&](?:q|query|destination|ll|daddr)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)/i) || a.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  return { href: c ? navUrl(c[1] + ',' + c[2]) : a, link: true, label: name || 'Pinezka z Map Google' };
+}
 /** Link otwierający kanał w aplikacji Pumble (Android: wprost aplikacja, inne – link, który telefon otwiera w aplikacji). */
 function pumbleHref(ch) {
   var u = 'https://app.pumble.com';
@@ -328,8 +340,9 @@ function contactHtml(o) {
   var tel = phone(o.kontakt), adr = o.adres || o.lok, h = '';
   if (!tel && !adr && !o.kontakt) return '';
   h += '<div class="contact">';
-  if (adr) h += '<a class="crow" target="_blank" rel="noopener" href="' + esc(navUrl(adr)) + '"><span class="ci">🧭</span><span class="grow"><b>' + esc(adr) + '</b>' +
-    (o.adres ? '' : '<span class="tiny muted"> (miejscowość – uzupełnij adres w edycji)</span>') + '<br><span class="tiny">Nawiguj w Mapach Google</span></span><span class="go">›</span></a>';
+  if (adr) { var mt = mapTarget(adr);
+    h += '<a class="crow" target="_blank" rel="noopener" href="' + esc(mt.href) + '"><span class="ci">' + (mt.link ? '📍' : '🧭') + '</span><span class="grow"><b>' + esc(mt.label) + '</b>' +
+      (o.adres ? '' : '<span class="tiny muted"> (miejscowość – uzupełnij adres w edycji)</span>') + '<br><span class="tiny">Nawiguj w Mapach Google</span></span><span class="go">›</span></a>'; }
   if (tel) h += '<a class="crow" href="tel:' + esc(tel) + '" target="_top"><span class="ci">📞</span><span class="grow"><b>' + esc(o.kontakt) + '</b><br><span class="tiny">Zadzwoń do klienta</span></span><span class="go">›</span></a>';
   else if (o.kontakt) h += '<div class="crow"><span class="ci">✉️</span><span class="grow">' + esc(o.kontakt) + '</span></div>';
   return h + '</div>';
@@ -758,7 +771,7 @@ function navHtml(cls) {
     var cnt = 0;
     if (n.r === 'ld' && S.leads) cnt = overdueCount();
     if (n.r === 'jutro') cnt = jutroOpen();
-    if (n.r === 'zakupy') cnt = (S.buys || []).filter(function (b) { return !b.arch; }).length;
+    if (n.r === 'zakupy') cnt = (S.buys || []).filter(function (b) { return !b.arch && !isOrdered(b); }).length;
     if (cnt) badgeH = cls === 'side' ? ' <span class="pill st-anulowane">' + cnt + '</span>' : '<span class="dot">' + (cnt > 99 ? '99+' : cnt) + '</span>';
     return '<button class="' + (base === n.r ? 'on' : '') + '" data-go="' + n.r + '"><span class="ic">' + n.ic + (cls === 'side' ? '' : badgeH) + '</span><span class="lb">' +
       n.t + (cls === 'side' ? badgeH : '') + '</span></button>';
@@ -1371,7 +1384,7 @@ function jobForm(j, title, actionHtml) {
     '<div class="two">' + fld('Klient / inwestor', inp('f_klient', j.klient)) + fld('Lokalizacja', inp('f_lok', j.lok)) + '</div>' +
     fld('Zakres prac', '<textarea id="f_zakres">' + esc(j.zakres || '') + '</textarea>') +
     '<div class="two">' + fld('Telefon do klienta', inp('f_kontakt', j.kontakt, 'np. 600 100 200', 'tel')) +
-    fld('Adres (do nawigacji)', inp('f_adres', j.adres, 'ulica nr, miejscowość')) + '</div>' +
+    fld('Adres albo link z Map Google', inp('f_adres', j.adres, 'ulica nr, miejscowość – albo wklej link')) + '</div>' +
     fld('Hasło w harmonogramie <span class="tiny">(krótkie słowo, które wpisujesz w harmonogram, np. nazwisko)</span>', inp('f_haslo', j.haslo, 'np. Brzezicki')) +
     fld('Uwagi (widzą tylko admini)', '<textarea id="f_uwagi">' + esc(j.uwagi || '') + '</textarea>') + actionHtml;
 }
@@ -1690,7 +1703,7 @@ function buyCard(b) {
   var btn = '';
   if (adm && !b.arch && !b._tmp) {
     btn += '<button class="btn sm acc" data-act="buyset" data-id="' + esc(b.id) + '" data-s="' + esc(kupioneStatus()) + '">✓ Kupione</button>';
-    if (st !== 'zamówione' && (S.lists.statusK || []).indexOf('Zamówione') >= 0) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="Zamówione">Zamówione</button>';
+    if (st !== 'zamówione' && (S.lists.statusK || []).indexOf('Zamówione') >= 0) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="Zamówione" title="Zamówione – czeka na dostawę">🚚 Zamówione</button>';
     btn += '<button class="btn sm" data-act="buyedit" data-id="' + esc(b.id) + '">✏️</button>';
   }
   if (adm && b.arch && !b._tmp) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="' + esc((S.lists.statusK || [])[0] || 'Do kupienia') + '">↩ Przywróć</button>';
@@ -1713,10 +1726,13 @@ function renderBuys() {
   }
   $('view').innerHTML = h;
 }
+function isOrdered(b) { return norm(b.status) === 'zamówione'; }
 function buyOpenHtml() {
-  var open = (S.buys || []).filter(function (b) { return !b.arch; });
-  open.sort(function (a, b) { return (norm(a.status) === 'zamówione') - (norm(b.status) === 'zamówione') || (!!b._tmp - !!a._tmp) || (a.id < b.id ? 1 : -1); });
-  return '<div class="grp">Do kupienia (' + open.length + ')</div><div class="list">' + (open.length ? open.map(buyCard).join('') : '<div class="empty">Nic do kupienia 🎉</div>') + '</div>';
+  var all = (S.buys || []).filter(function (b) { return !b.arch; });
+  all.sort(function (a, b) { return (!!b._tmp - !!a._tmp) || (a.id < b.id ? 1 : -1); });
+  var open = all.filter(function (b) { return !isOrdered(b); }), ord = all.filter(isOrdered);
+  return '<div class="grp">Do kupienia (' + open.length + ')</div><div class="list">' + (open.length ? open.map(buyCard).join('') : '<div class="empty">Nic do kupienia 🎉</div>') + '</div>' +
+    (ord.length ? '<div class="grp">Zamówione – czekam na dostawę (' + ord.length + ')</div><div class="list">' + ord.map(buyCard).join('') + '</div>' : '');
 }
 function buyAdd() {
   var co = ($('buy_co') || {}).value || '', uw = ($('buy_uw') || {}).value || '';
