@@ -792,11 +792,24 @@ function navReplace(route) {
 }
 function go(route, noPush) {
   if (S.sheetOpen) closeSheet();
-  if (route === 'harm' && S.route.split('/')[0] !== 'harm') S.week = S.today;   // harmonogram zawsze od dziś
+  var toHarm = route === 'harm' && S.route.split('/')[0] !== 'harm';
+  if (toHarm) S.week = monday(S.today);                          // harmonogram: bieżący tydzień od poniedziałku…
   S.route = route;
   if (!noPush) navPush(route);
   render();
   window.scrollTo(0, 0);
+  if (toHarm) scrollToToday();                                   // …przewinięty do dzisiejszego dnia
+}
+/** Przewija harmonogram tak, żeby dzisiejszy dzień był u góry ekranu (pod paskiem tytułu). */
+function scrollToToday() {
+  setTimeout(function () {
+    var el = document.querySelector('#view .day.today, #view tr.today');
+    if (!el || pd(S.today).getDay() === 1) return;               // poniedziałek – i tak na górze
+    var r = el.getBoundingClientRect(), top = $('top') ? $('top').offsetHeight : 0;
+    var tabs = $('tabs') && $('tabs').offsetHeight || 0;
+    if (r.bottom <= window.innerHeight - tabs && r.top >= top) return;   // już widać w całości
+    window.scrollTo(0, Math.max(0, window.scrollY + r.top - top - 8));
+  }, 0);
 }
 function back() {
   var p = S.route.split('/');
@@ -1970,7 +1983,7 @@ var ACT = {
   back: back, reload: reload, close: closeSheet, retry: function () { $('view').innerHTML = '<div class="loading"><span class="spin"></span></div>'; sync(); },
   yes: function () { var f = S.askFn; S.askFn = null; closeSheet(); if (f) f(); },
   install: function () { if (installEvt) { installEvt.prompt(); installEvt = null; } },
-  wk: function (el) { var n = +el.getAttribute('data-n'), len = S.harmMode === '2w' && midW() ? 14 : 7; S.week = n === 0 ? S.today : addD(S.week, n * len); renderHarm(); },
+  wk: function (el) { var n = +el.getAttribute('data-n'), len = S.harmMode === '2w' && midW() ? 14 : 7; S.week = n === 0 ? monday(S.today) : addD(S.week, n * len); renderHarm(); if (n === 0) scrollToToday(); },
   hmode: function (el) { S.harmMode = el.getAttribute('data-m'); renderHarm(); },
   onlyme: function (el) { S.onlyMe = el.checked; renderHarm(); },
   hcell: harmCellClick,
@@ -2052,20 +2065,22 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('mess
 
 // ------------------------------------------------------------------------------------------------ start
 function initRoute() {
-  S.week = S.today;
+  S.week = monday(S.today);
   S.bp = bp();
   if (MODE === 'gas') {
     try {
       google.script.history.setChangeHandler(function (e) { var r = (e.state && e.state.r) || (e.location && e.location.hash) || 'harm'; go(r, true); });
-      google.script.url.getLocation(function (loc) { if (loc && loc.hash) go(loc.hash, true); else render(); });
-    } catch (e) { render(); }
+      google.script.url.getLocation(function (loc) { if (loc && loc.hash) go(loc.hash, true); else render(); firstScroll(); });
+    } catch (e) { render(); firstScroll(); }
   } else {
     window.addEventListener('popstate', function (e) { go((e.state && e.state.r) || location.hash.slice(1) || 'harm', true); });
     var h = location.hash.slice(1);
     if (h) go(h, true); else render();
+    firstScroll();
   }
   badge();
 }
+function firstScroll() { if (S.route.split('/')[0] === 'harm') scrollToToday(); }
 function askLink() {
   $('view').innerHTML = '<div class="loading" style="padding:20px"><div style="font-size:40px">🔑</div><div class="b">Wklej swój link do aplikacji</div>' +
     '<div class="small" style="max-width:360px;text-align:center">Osobisty link dostajesz od administratora (kończy się na „?u=…”). Wystarczy raz – aplikacja go zapamięta.</div>' +
