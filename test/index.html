@@ -267,6 +267,12 @@ div.drf{color:var(--text)}
 .drow s{color:var(--muted)}
 .day.hl,.hgrid tr.hl td{animation:hlpulse 2.4s ease-out 1}
 @keyframes hlpulse{0%,40%{box-shadow:inset 0 0 0 3px var(--orange)}100%{box-shadow:none}}
+/* ekipy w harmonogramie */
+.pill.crew{font-size:11.5px;padding:1px 8px}
+.ent .crews{display:block;margin-top:4px}
+.crewleg{display:flex;gap:16px;flex-wrap:wrap;margin:-4px 0 10px;color:var(--text)}
+.crewleg .cl{display:inline-flex;align-items:center;gap:6px}
+.crewleg i{display:inline-block;width:4px;height:16px;border-radius:2px}
 </style>
 
 </head>
@@ -1227,6 +1233,47 @@ function harmRange() {
   }
   return { from: S.week, len: 7, to: addD(S.week, 6), month: false };
 }
+// Ekipy w harmonogramie: ekipa = tam, gdzie danego dnia jest jej brygadzista. Brygadzistę rozpoznaję po nazwie ekipy
+// z listy „Ekipy” (np. „ekipa Bartek” → kolumna „Bartek”). Osoby z tym samym zleceniem co brygadzista = jego ekipa tego dnia.
+var CREW_PAL = [['#E0E7FF', '#1E3A8A'], ['#FFE4D0', '#9A3412'], ['#CCFBF1', '#115E59'], ['#F3E8FF', '#6B21A8'], ['#FEF9C3', '#854D0E']];
+function crewLeads() {
+  if (S._cl && S._clFor === S.schedule && S._clL === S.lists) return S._cl;
+  var out = [];
+  (S.lists.ekipy || []).forEach(function (e) {
+    var words = ' ' + norm(e).split(/[^0-9a-ząćęłńóśźżäöüé]+/).join(' ') + ' ';
+    var p = (S.schedule.persons || []).filter(function (x) { var n = norm(x.name); return n && words.indexOf(' ' + n + ' ') >= 0; })[0];
+    if (p && !out.some(function (o) { return o.c === p.c; })) { var pal = CREW_PAL[out.length % CREW_PAL.length]; out.push({ crew: e, c: p.c, lead: p.name, bg: pal[0], fg: pal[1] }); }
+  });
+  S._cl = out; S._clFor = S.schedule; S._clL = S.lists;
+  return out;
+}
+function isAbsence(t) {
+  var n = norm(t);
+  return !!CODES[n] || (S.lists.codes || []).some(function (c) { return norm(c) === n; });
+}
+/** Gdzie danego dnia są brygadziści: [{crew, bg, fg, parts}] (bez urlopów i pustych). */
+function dayLeads(d, dmap) {
+  var out = [];
+  crewLeads().forEach(function (l) {
+    var t = cellOf(d, l.c, dmap).t;
+    if (!t || isAbsence(t)) return;
+    out.push({ crew: l.crew, bg: l.bg, fg: l.fg, parts: cellParts(t).map(norm) });
+  });
+  return out;
+}
+function cellCrews(t, leads) {
+  if (!t || !leads.length) return [];
+  var parts = cellParts(t).map(norm);
+  return leads.filter(function (l) { return parts.some(function (x) { return l.parts.indexOf(x) >= 0; }); });
+}
+function crewPill(l) { return '<span class="pill crew" style="background:' + l.bg + ';color:' + l.fg + '">🚐 ' + esc(l.crew) + '</span>'; }
+function crewLegend() {
+  var cl = crewLeads();
+  if (!cl.length) return '';
+  return '<div class="crewleg small">' + cl.map(function (l) {
+    return '<span class="cl"><i style="background:' + l.fg + '"></i>' + esc(l.crew) + ' <span class="muted">(gdzie ' + esc(l.lead) + ')</span></span>';
+  }).join('') + '</div>';
+}
 function renderHarm() {
   setTop('Harmonogram', false);
   var R = harmRange(), len = R.len, from = R.from, to = R.to;
@@ -1245,6 +1292,7 @@ function renderHarm() {
   if (S.schedule.from && (to < S.schedule.from || from > S.schedule.to))
     h += '<div class="card small muted">Harmonogram w arkuszu obejmuje ' + fd(S.schedule.from) + ' – ' + fd(S.schedule.to) + '.</div>';
   if (isAdmin()) h += draftBar();
+  if (midW()) h += crewLegend();
   var dm = dayMap(), persons = S.schedule.persons.filter(function (p) { return !S.onlyMe || p.c === mc; });
   var dmap = isAdmin() ? draftMap() : null;
   if (midW()) h += harmGrid(from, len, dm, persons, dmap); else h += harmCards(from, len, dm, persons, dmap);
@@ -1310,17 +1358,23 @@ function schedDiscard(keys) {
 }
 function harmGrid(from, len, dm, persons, dmap) {
   var h = '<div class="hgrid-wrap"><table class="hgrid"><thead><tr><th class="d">Dzień</th>' +
-    persons.map(function (p) { return '<th>' + esc(p.name) + '</th>'; }).join('') +
+    persons.map(function (p) {
+      var l = crewLeads().filter(function (x) { return x.c === p.c; })[0];
+      return '<th' + (l ? ' title="Brygadzista: ' + esc(l.crew) + '" style="box-shadow:inset 0 -3px 0 ' + l.fg + '"' : '') + '>' + esc(p.name) + '</th>';
+    }).join('') +
     (S.onlyMe ? '' : '<th>Uwagi</th>') + '</tr></thead><tbody>';
   for (var i = 0; i < len; i++) {
     var ds = addD(from, i), d = dm[ds] || { d: ds, cells: {}, wd: 1 }, dt = pd(ds);
     var cls = (d.wd === 0 ? 'we ' : '') + (d.wd === 2 ? 'hol ' : '') + (ds === S.today ? 'today ' : '') + (i > 0 && dt.getDay() === 1 ? 'wk' : '');
     h += '<tr class="' + cls + '" data-day="' + ds + '"><td class="d"><b>' + DOW[dt.getDay()] + '</b> ' + fds(ds) +
       (d.info && d.wd === 2 ? '<div class="tiny">' + esc(d.info) + '</div>' : '') + '</td>';
+    var lt = dayLeads(d, dmap);
     persons.forEach(function (p) {
-      var v = cellOf(d, p.c, dmap), t = v.t;
-      h += '<td class="cell' + (v.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
-        (v.dr ? ' title="Do zatwierdzenia. Teraz: ' + esc(v.o || '(pusto)') + '"' : '') + '>' +
+      var v = cellOf(d, p.c, dmap), t = v.t, cr = cellCrews(t, lt);
+      var tip = (cr.length ? cr.map(function (l) { return l.crew; }).join(' + ') : '') + (v.dr ? (cr.length ? ' · ' : '') + 'Do zatwierdzenia. Teraz: ' + (v.o || '(pusto)') : '');
+      h += '<td class="cell' + (v.dr ? ' drf' : '') + (cr.length ? ' crw' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
+        (cr.length ? ' style="box-shadow:inset 4px 0 0 ' + cr[0].fg + (cr[1] ? ',inset 8px 0 0 ' + cr[1].fg : '') + '"' : '') +
+        (tip ? ' title="' + esc(tip) + '"' : '') + '>' +
         (t ? chipHtml(t, !isAdmin()) : (v.dr && v.o ? '<span class="chip c-del">' + esc(v.o) + '</span>' : '')) + '</td>';
     });
     if (!S.onlyMe) { var u = cellOf(d, 13, dmap);
@@ -1350,7 +1404,7 @@ function harmCards(from, len, dm, persons, dmap) {
       if (!groups[k]) { groups[k] = { t: t, who: [], cols: [], dr: v.dr ? (v.t ? 'new' : 'del') : '' }; order.push(k); }
       groups[k].who.push(p.name); groups[k].cols.push(p.c);
     });
-    var uwv = cellOf(d, 13, dmap);
+    var uwv = cellOf(d, 13, dmap), lt = dayLeads(d, dmap);
     var cls = 'day' + (d.wd === 0 ? ' we' : '') + (d.wd === 2 ? ' hol' : '') + (ds === S.today ? ' today' : '');
     h += '<div class="' + cls + '" data-day="' + ds + '"><div class="day-h"><span class="grow">' + DOWL[dt.getDay()] + ' ' + fds(ds) +
       (ds === S.today ? ' <span class="pill" style="background:var(--orange);color:#fff">dziś</span>' : '') +
@@ -1359,11 +1413,12 @@ function harmCards(from, len, dm, persons, dmap) {
     if (!order.length && !uwv.t && !uwv.dr) { h += (d.wd === 0 ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
     h += '<div class="day-b">';
     order.forEach(function (k) {
-      var g = groups[k], js = g.dr === 'del' ? [] : cellJobs(g.t);
+      var g = groups[k], js = g.dr === 'del' ? [] : cellJobs(g.t), cr = g.dr === 'del' ? [] : cellCrews(g.t, lt);
       h += '<div class="ent' + (g.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' +
         (g.dr === 'del' ? '<span class="chip c-del">' + esc(g.t) + '</span>' : chipHtml(g.t, !isAdmin())) +
         '</span><span class="who grow">' + esc(g.who.join(', ')) + (g.dr ? ' <span class="pill drfp">' + (g.dr === 'del' ? 'usunięte – do zatw.' : 'do zatwierdzenia') + '</span>' : '') +
-        js.map(function (j) { return '<br><span class="tiny">' + esc([j.klient, j.lok].filter(Boolean).join(' – ')) + '</span>'; }).join('') + '</span></div>';
+        js.map(function (j) { return '<br><span class="tiny">' + esc([j.klient, j.lok].filter(Boolean).join(' – ')) + '</span>'; }).join('') +
+        (cr.length ? '<span class="crews">' + cr.map(crewPill).join(' ') + '</span>' : '') + '</span></div>';
     });
     if ((uwv.t || uwv.dr) && !S.onlyMe) h += '<div class="small muted' + (uwv.dr ? ' drf' : '') + '" style="padding-top:6px"' +
       (isAdmin() ? ' data-act="hcell" data-d="' + ds + '" data-c="13"' : '') + '>📝 ' + (uwv.t ? esc(uwv.t) : '<s>' + esc(uwv.o) + '</s>') +
