@@ -1703,7 +1703,6 @@ function buyCard(b) {
   var btn = '';
   if (adm && !b.arch && !b._tmp) {
     btn += '<button class="btn sm acc" data-act="buyset" data-id="' + esc(b.id) + '" data-s="' + esc(kupioneStatus()) + '">✓ Kupione</button>';
-    if (st !== 'zamówione' && (S.lists.statusK || []).indexOf('Zamówione') >= 0) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="Zamówione" title="Zamówione – czeka na dostawę">🚚 Zamówione</button>';
     btn += '<button class="btn sm" data-act="buyedit" data-id="' + esc(b.id) + '">✏️</button>';
   }
   if (adm && b.arch && !b._tmp) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="' + esc((S.lists.statusK || [])[0] || 'Do kupienia') + '">↩ Przywróć</button>';
