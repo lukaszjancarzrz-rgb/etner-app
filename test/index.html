@@ -220,6 +220,38 @@ table.hgrid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
 .wait{font-size:11.5px;color:var(--warn);font-weight:600;margin-left:6px}
 .msg.tmp{opacity:.6}
 .btn.install{background:var(--orange);border-color:var(--orange);color:#fff}
+/* v2.1 */
+#tabs button{position:relative;padding:4px 0 2px;min-width:0}
+#tabs button .ic{position:relative;display:inline-flex;align-items:center;justify-content:center;width:52px;height:30px;border-radius:15px;transition:background .15s}
+#tabs button .lb{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:clamp(9px,2.5vw,11.5px);letter-spacing:-.25px;padding:0 1px}
+#tabs button.on{color:var(--navy);font-weight:700}
+#tabs button.on .lb{letter-spacing:-.5px}
+#tabs button.on .ic{background:#DCE6F5;box-shadow:inset 0 0 0 1.5px #B7C8E6}
+#tabs button.on::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;border-radius:0 0 3px 3px;background:var(--orange)}
+#tabs .dot{position:absolute;top:-3px;right:4px;min-width:17px;height:17px;border-radius:9px;background:var(--bad);color:#fff;font-size:10.5px;font-weight:700;line-height:17px;padding:0 4px;font-style:normal}
+#side button.on{box-shadow:inset 4px 0 0 var(--orange)}
+.contact{margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.contact .crow{display:flex;align-items:center;gap:10px;padding:10px 12px;color:var(--text);text-decoration:none;border-top:1px solid var(--line);font-size:14.5px}
+.contact .crow:first-child{border-top:0}
+.contact a.crow:active{background:var(--soft)}
+.contact .ci{font-size:22px;width:30px;text-align:center}
+.contact .go{font-size:22px;color:var(--muted)}
+.chips{display:inline-flex;flex-wrap:wrap;gap:4px;max-width:55%}
+.chip.half{font-size:12.5px}
+.dayhead{display:flex;align-items:center;margin:2px 2px 12px}
+.dayhead .big{font-size:20px;font-weight:700;color:var(--navy);text-transform:capitalize}
+.addin{border:1px solid #D3D9E3;border-radius:10px;padding:10px 11px;min-height:44px;background:#fff;min-width:0}
+.chk{display:flex;align-items:center;gap:12px;padding:11px 4px;border-top:1px solid var(--line);cursor:pointer}
+.chk input{width:24px;height:24px;flex:0 0 24px;accent-color:var(--ok)}
+.chk .t{display:block;font-size:15.5px}
+.chk.done .t{text-decoration:line-through;color:var(--muted)}
+.chk.tmp{opacity:.7}
+.jcard .sub{margin-top:12px;font-weight:600;font-size:13.5px;color:var(--navy)}
+.jcard .mini{padding:6px 0;border-bottom:1px dashed var(--line)}
+.jcard .mini:last-child{border-bottom:0}
+.pushon{display:flex;align-items:center;gap:12px;background:#FFF7EE;border:1px solid #F6D3B0}
+.item.buy.done{opacity:.75}
+.st-do-kupienia{background:#FCE4CC;color:#8A4100}.st-zamówione{background:#DDEBF7;color:#1F4E79}.st-kupione{background:#DCF0E3;color:#1E6B3B}
 </style>
 
 </head>
@@ -255,7 +287,7 @@ var KEY = TOKEN ? TOKEN.slice(-8) : 'x';
 
 var S = { route: 'harm', week: null, harmMode: 'week', onlyMe: false, zlTab: 'akt', ldTab: 'juz', q: { zl: '', ld: '' },
           diary: {}, diaryAt: {}, diaryLoading: {}, thumbs: {}, pending: [], pumbleMsgs: {}, users: null, settings: null,
-          v: null, outbox: [], hist: {} };
+          v: null, outbox: [], hist: {}, checks: [], buys: [], crews: {}, jutroCrew: '', tomorrow: {}, buyShowDone: false };
 var DOW = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
 var DOWL = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
 var MS = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
@@ -279,6 +311,29 @@ function money(v) { if (v === '' || v === null || v === undefined) return ''; va
   return n.toLocaleString('pl-PL', { maximumFractionDigits: 2 }) + ' zł'; }
 function phone(s) { var m = String(s || '').match(/(\+?\d[\d\s\-]{7,}\d)/); return m ? m[1].replace(/[\s\-]/g, '') : ''; }
 function isAdmin() { return S.user && S.user.role === 'admin'; }
+function isAndroid() { return /Android/i.test(navigator.userAgent); }
+function isIOS() { return /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+function navUrl(adres) { return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(adres) + '&travelmode=driving'; }
+/** Link otwierający kanał w aplikacji Pumble (Android: wprost aplikacja, inne – link, który telefon otwiera w aplikacji). */
+function pumbleHref(ch) {
+  var u = 'https://app.pumble.com';
+  if (ch && ch.link) u = ch.link;
+  else if (ch && S.pumbleTpl) u = S.pumbleTpl.replace('{ch}', ch.id);
+  else if (ch && S.pumbleWs) u = 'https://app.pumble.com/workspace/' + S.pumbleWs + '/' + ch.id;
+  if (isAndroid()) return 'intent://' + u.replace(/^https:\/\//, '') + '#Intent;scheme=https;package=com.pumble;S.browser_fallback_url=' + encodeURIComponent(u) + ';end';
+  return u;
+}
+/** Karta: adres (nawigacja) i telefon (połączenie). */
+function contactHtml(o) {
+  var tel = phone(o.kontakt), adr = o.adres || o.lok, h = '';
+  if (!tel && !adr && !o.kontakt) return '';
+  h += '<div class="contact">';
+  if (adr) h += '<a class="crow" target="_blank" rel="noopener" href="' + esc(navUrl(adr)) + '"><span class="ci">🧭</span><span class="grow"><b>' + esc(adr) + '</b>' +
+    (o.adres ? '' : '<span class="tiny muted"> (miejscowość – uzupełnij adres w edycji)</span>') + '<br><span class="tiny">Nawiguj w Mapach Google</span></span><span class="go">›</span></a>';
+  if (tel) h += '<a class="crow" href="tel:' + esc(tel) + '" target="_top"><span class="ci">📞</span><span class="grow"><b>' + esc(o.kontakt) + '</b><br><span class="tiny">Zadzwoń do klienta</span></span><span class="go">›</span></a>';
+  else if (o.kontakt) h += '<div class="crow"><span class="ci">✉️</span><span class="grow">' + esc(o.kontakt) + '</span></div>';
+  return h + '</div>';
+}
 function stCls(s) { return 'st-' + slug(s); }
 function katCls(k) { return 'k-' + String(k || '').replace(/[^A-Za-z]/g, ''); }
 function katName(k) { var f = (S.lists.kat || []).filter(function (x) { return x.k === k; })[0]; return f ? f.n : ''; }
@@ -368,12 +423,16 @@ function applyData(d) {
   S.v = d.v; S.user = d.user; S.lists = d.lists; S.jobs = d.jobs || []; S.leads = d.leads; S.hist = d.hist || {};
   S.schedule = d.schedule; S.areas = d.areas || { Z: [], L: [] }; S.today = d.today || S.today || todayLocal();
   S.pumble = d.pumble; S.test = !!d.test; S.serverVersion = d.version;
+  S.checks = d.checks || []; S.buys = d.buys || []; S.crews = d.crews || {}; S.pumbleWs = d.pumbleWs || ''; S.pumbleTpl = d.pumbleTpl || '';
+  S.pwaUrl = d.pwaUrl || ''; S.vapid = d.vapid || '';
+  if (!S.areas.K) S.areas.K = [];
   S._jm = null;
   S.outbox.forEach(function (op) { applyOp(op); });
 }
 function snapshotOf() {
   return { v: S.v, user: S.user, lists: S.lists, jobs: S.jobs, leads: S.leads, hist: S.hist, schedule: S.schedule, areas: S.areas,
-           today: S.today, pumble: S.pumble, test: S.test, version: S.serverVersion };
+           today: S.today, pumble: S.pumble, test: S.test, version: S.serverVersion, checks: S.checks, buys: S.buys, crews: S.crews,
+           pumbleWs: S.pumbleWs, pumbleTpl: S.pumbleTpl, pwaUrl: S.pwaUrl, vapid: S.vapid };
 }
 function saveData(d) {
   clearTimeout(persistSoon.tm);
@@ -398,6 +457,7 @@ function sync(force) {
     var first = !S.user;
     saveData(d);                                          // dane z serwera od razu do pamięci telefonu
     applyData(d);
+    setTimeout(prefetch, 300);
     if (first) initRoute(); else rerender();
     if (force) toast('Dane odświeżone.');
   }).catch(function (e) {
@@ -425,7 +485,14 @@ function adopt(res) {
 // ------------------------------------------------------------------------------------------------ kolejka zapisów (działa też bez zasięgu)
 var Q = { running: false, fail: 0 };
 var OP_LABEL = { sched: 'Harmonogram', job: 'Zlecenie', lead: 'Lead', contact: 'Kontakt', tojob: 'Zlecenie z leada', diary: 'Wpis',
-                 ddel: 'Usuwanie wpisu', psend: 'Wiadomość Pumble' };
+                 ddel: 'Usuwanie wpisu', psend: 'Wiadomość Pumble', chk_add: 'Lista do zabrania', chk_tog: 'Lista do zabrania',
+                 chk_del: 'Lista do zabrania', buy_add: 'Zakupy', buy_set: 'Zakupy', buy_del: 'Zakupy' };
+/** Po zapisie nowej pozycji: tymczasowy numer w kolejnych zapisach z kolejki zamieniony na prawdziwy. */
+function remapOutbox(tmp, real) {
+  if (!tmp || tmp === real) return;
+  S.outbox.forEach(function (op) { if (op.p && op.p.id === tmp) op.p.id = real; });
+  saveOutbox();
+}
 function saveOutbox() { return idbPut('outbox_' + KEY, S.outbox.map(function (o) { var c = {}; for (var k in o) if (k !== 'st') c[k] = o[k]; return c; })); }
 function enqueue(type, p) {
   var op = { id: uid(), type: type, p: p, t: Date.now() };
@@ -471,6 +538,20 @@ function applyOp(op) {
   else if (op.type === 'job') jobApply(p.job, p.tmpId);
   else if (op.type === 'lead') leadApply(p.lead, p.tmpId);
   else if (op.type === 'contact') contactApply(p);
+  else if (op.type === 'chk_add') {
+    if (!byId(S.checks, p.tmpId)) S.checks.push({ id: p.tmpId, crew: p.crew, day: p.day, text: p.text, by: S.user.name, at: '', done: false, _tmp: true });
+  }
+  else if (op.type === 'chk_tog') { var c = byId(S.checks, p.id); if (c) { c.done = p.done; c.doneBy = p.done ? S.user.name : ''; } }
+  else if (op.type === 'chk_del') S.checks = S.checks.filter(function (x) { return x.id !== p.id; });
+  else if (op.type === 'buy_add') {
+    if (!byId(S.buys, p.tmpId)) S.buys.push({ id: p.tmpId, co: p.co, uwagi: p.uwagi || '', status: (S.lists.statusK || [])[0] || 'Do kupienia', by: S.user.name,
+      sklep: '', grupa: '', kwota: '', sec: '', arch: false, zamk: '', _tmp: true });
+  }
+  else if (op.type === 'buy_set') {
+    var bq = byId(S.buys, p.id);
+    if (bq) { Object.keys(p.patch).forEach(function (k) { bq[k] = p.patch[k]; }); place(bq, S.areas.K); }
+  }
+  else if (op.type === 'buy_del') S.buys = S.buys.filter(function (x) { return x.id !== p.id; });
   else if (op.type === 'tojob') {
     jobApply(p.job, p.tmpId);
     var j = byId(S.jobs, p.tmpId); if (j) j.leadId = p.leadId;
@@ -503,27 +584,47 @@ function sendOp(op) {
   });
   if (op.type === 'psend') return opCall(op, 'apiPumbleSend', [p.obj, p.text]).then(function (r) {
     if (r && r.messages) S.pumbleMsgs[p.obj] = r;
+    delete S.tomorrowAt;
   });
+  if (op.type === 'chk_add') return opCall(op, 'apiCheckAdd', [p.crew, p.day, p.text]).then(function (r) {
+    if (r && r.item) { S.checks = S.checks.filter(function (x) { return x.id !== p.tmpId && x.id !== r.item.id; }).concat([r.item]); remapOutbox(p.tmpId, r.item.id); }
+    adopt(r);
+  });
+  if (op.type === 'chk_tog') return opCall(op, 'apiCheckToggle', [p.id, p.done]).then(function (r) {
+    if (r && r.item) S.checks = S.checks.map(function (x) { return x.id === r.item.id ? r.item : x; });
+    adopt(r);
+  });
+  if (op.type === 'chk_del') return opCall(op, 'apiCheckDelete', [p.id]).then(adopt);
+  if (op.type === 'buy_add') return opCall(op, 'apiBuyAdd', [{ co: p.co, uwagi: p.uwagi }]).then(function (r) {
+    if (r && r.item) { S.buys = S.buys.filter(function (x) { return x.id !== p.tmpId && x.id !== r.item.id; }).concat([r.item]); remapOutbox(p.tmpId, r.item.id); }
+    adopt(r);
+  });
+  if (op.type === 'buy_set') return opCall(op, 'apiBuySet', [p.id, p.patch]).then(function (r) {
+    if (r && r.item) S.buys = S.buys.map(function (x) { return x.id === r.item.id ? r.item : x; });
+    adopt(r);
+  });
+  if (op.type === 'buy_del') return opCall(op, 'apiBuyDelete', [p.id]).then(adopt);
   return Promise.resolve();
 }
 function sendDiary(op) {
-  var p = op.p, i = 0;
-  function next() {
-    while (i < p.photos.length && p.photos[i].done) i++;
-    if (i >= p.photos.length) return Promise.resolve();
-    var ph = p.photos[i];
-    op.prog = 'zdjęcie ' + (i + 1) + ' z ' + p.photos.length; rerenderDetail();
+  var p = op.p, idx = [], doneN = 0;
+  p.photos.forEach(function (x, i) { if (x.done) doneN++; else idx.push(i); });
+  var prog = function () { op.prog = 'zdjęcia ' + doneN + ' z ' + p.photos.length; rerenderDetail(); };
+  function worker() {                                          // dwa zdjęcia naraz
+    if (!idx.length) return Promise.resolve();
+    var i = idx.shift(), ph = p.photos[i];
     return idbGet('ph_' + ph.key).then(function (full) {
       if (!full) throw new Error('Zdjęcie zginęło z pamięci telefonu – dodaj je jeszcze raz.');
       return opCall(op, 'apiPhotoUpload', [p.obj, ph.name, full.split(',')[1], ph.thumb.split(',')[1]], '_p' + i);
     }).then(function (r) {
       ph.done = { f: r.f, t: r.t, n: r.n };
       if (r.t) S.thumbs[r.t] = ph.thumb;
-      saveOutbox();
-      i++;
-      return next();
+      doneN++; prog(); saveOutbox();
+      return worker();
     });
   }
+  if (idx.length) prog();
+  var next = function () { return Promise.all([worker(), worker()]); };
   return next().then(function () {
     op.prog = 'zapisywanie…'; rerenderDetail();
     return opCall(op, 'apiDiaryAdd', [p.obj, p.text, p.photos.map(function (x) { return x.done; })]);
@@ -571,7 +672,7 @@ function place(rec, areas) {
     rec.sec = target.name; rec.arch = !!target.arch; rec.zamk = target.arch ? S.today : '';
   }
 }
-var JOB_F = ['kat', 'status', 'termin', 'ekipa', 'lok', 'klient', 'zakres', 'kontakt', 'haslo', 'uwagi'];
+var JOB_F = ['kat', 'status', 'termin', 'ekipa', 'lok', 'klient', 'zakres', 'kontakt', 'haslo', 'uwagi', 'adres'];
 var LEAD_F = ['temat', 'kat', 'status', 'klient', 'skad', 'kontakt', 'opis', 'wartosc', 'nastepny', 'dodano', 'uwagi'];
 function jobApply(job, tmpId) {
   var j = byId(S.jobs, tmpId || job.id);
@@ -618,12 +719,12 @@ function calcJobDays(jobs) {
   if (!hs.length) return;
   (S.schedule.days || []).forEach(function (d) {
     var vals = [];
-    for (var c in d.cells) if (PERSON_COLS.indexOf(+c) >= 0) vals.push(norm(d.cells[c]));
+    for (var c in d.cells) if (PERSON_COLS.indexOf(+c) >= 0) { var t = norm(d.cells[c]); vals.push({ t: t, w: 1 / (1 + (t.match(/\//g) || []).length) }); }
     if (!vals.length) return;
     hs.forEach(function (x) {
       var n = 0;
-      for (var i = 0; i < vals.length; i++) if (vals[i].indexOf(x.h) >= 0) n++;
-      if (n) { x.j.dni += n; if (!x.j.od) x.j.od = d.d; x.j.do = d.d; }
+      for (var i = 0; i < vals.length; i++) if (vals[i].t.indexOf(x.h) >= 0) n += vals[i].w;
+      if (n) { x.j.dni = Math.round((x.j.dni + n) * 100) / 100; if (!x.j.od) x.j.od = d.d; x.j.do = d.d; }
     });
   });
 }
@@ -643,8 +744,10 @@ function badge() {
 // ------------------------------------------------------------------------------------------------ nawigacja
 var NAV = [
   { r: 'harm', ic: '📅', t: 'Harmonogram' },
+  { r: 'jutro', ic: '🧰', t: 'Na jutro' },
   { r: 'zl', ic: '🛠️', t: 'Zlecenia' },
   { r: 'ld', ic: '📞', t: 'Leady', admin: true },
+  { r: 'zakupy', ic: '🛒', t: 'Zakupy' },
   { r: 'more', ic: '☰', t: 'Więcej' }
 ];
 function navHtml(cls) {
@@ -652,8 +755,12 @@ function navHtml(cls) {
   if (['users', 'settings', 'help'].indexOf(base) >= 0) base = 'more';
   return NAV.filter(function (n) { return !n.admin || isAdmin(); }).map(function (n) {
     var badgeH = '';
-    if (n.r === 'ld' && S.leads) { var o = overdueCount(); if (o) badgeH = ' <span class="pill st-anulowane">' + o + '</span>'; }
-    return '<button class="' + (base === n.r ? 'on' : '') + '" data-go="' + n.r + '"><span class="ic">' + n.ic + '</span><span>' +
+    var cnt = 0;
+    if (n.r === 'ld' && S.leads) cnt = overdueCount();
+    if (n.r === 'jutro') cnt = jutroOpen();
+    if (n.r === 'zakupy') cnt = (S.buys || []).filter(function (b) { return !b.arch; }).length;
+    if (cnt) badgeH = cls === 'side' ? ' <span class="pill st-anulowane">' + cnt + '</span>' : '<span class="dot">' + (cnt > 99 ? '99+' : cnt) + '</span>';
+    return '<button class="' + (base === n.r ? 'on' : '') + '" data-go="' + n.r + '"><span class="ic">' + n.ic + (cls === 'side' ? '' : badgeH) + '</span><span class="lb">' +
       n.t + (cls === 'side' ? badgeH : '') + '</span></button>';
   }).join('');
 }
@@ -672,6 +779,7 @@ function navReplace(route) {
 }
 function go(route, noPush) {
   if (S.sheetOpen) closeSheet();
+  if (route === 'harm' && S.route.split('/')[0] !== 'harm') S.week = S.today;   // harmonogram zawsze od dziś
   S.route = route;
   if (!noPush) navPush(route);
   render();
@@ -691,6 +799,8 @@ function render() {
   renderNav();
   var p = S.route.split('/');
   if (p[0] === 'zl') return renderJobs(p[1]);
+  if (p[0] === 'jutro') return renderJutro();
+  if (p[0] === 'zakupy') return renderBuys();
   if (p[0] === 'ld' && isAdmin()) return renderLeads(p[1]);
   if (p[0] === 'more') return renderMore();
   if (p[0] === 'users' && isAdmin()) return renderUsers();
@@ -703,6 +813,7 @@ function render() {
 function rerender() {
   if (!S.user || S.denied) return;
   var ae = document.activeElement;
+  if (!S.sheetOpen && ae && /^(chk_text|buy_co|buy_uw)$/.test(ae.id) && refreshAddLists()) { S.dirty = true; return; }
   if (S.sheetOpen || (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== 'q_zl' && ae.id !== 'q_ld')) { S.dirty = true; return; }
   S.dirty = false;
   var y = window.scrollY, pl = document.querySelector('.pane-l'), pls = pl ? pl.scrollTop : 0;
@@ -729,6 +840,14 @@ function matchJob(text) {
   for (var i = 0; i < m.length; i++) if (t.indexOf(m[i].h) >= 0) return m[i].j;
   return null;
 }
+/** Części komórki harmonogramu: „Brzezicki / Paczka” = dwa zlecenia po pół dnia. */
+function cellParts(text) { return String(text || '').split('/').map(function (x) { return x.trim(); }).filter(Boolean); }
+function cellJobs(text) {
+  var out = [];
+  cellParts(text).forEach(function (pt) { var j = matchJob(pt); if (j && out.indexOf(j) < 0) out.push(j); });
+  return out;
+}
+function fmtDni(n) { return String(Math.round((+n || 0) * 10) / 10).replace('.', ','); }
 function chipFor(text) {
   var c = CODES[norm(text)];
   if (c) return { cls: c, style: '', job: null };
@@ -783,16 +902,20 @@ function harmGrid(from, len, dm, persons) {
       (d.info && d.wd === 2 ? '<div class="tiny">' + esc(d.info) + '</div>' : '') + '</td>';
     persons.forEach(function (p) {
       var t = d.cells[p.c] || '';
-      h += '<td class="cell" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '">' + (t ? chipHtml(t) : '') + '</td>';
+      h += '<td class="cell" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '">' + (t ? chipHtml(t, !isAdmin()) : '') + '</td>';
     });
     if (!S.onlyMe) h += '<td class="uw cell" data-act="hcell" data-d="' + ds + '" data-c="13">' + esc(d.uw || '') + '</td>';
     h += '</tr>';
   }
   return h + '</tbody></table></div>';
 }
-function chipHtml(t) {
-  var c = chipFor(t);
-  return '<span class="chip ' + c.cls + '" style="' + c.style + '">' + esc(t) + '</span>';
+function chipHtml(t, link) {
+  var parts = cellParts(t);
+  if (parts.length < 2) { var c = chipFor(t); return '<span class="chip ' + c.cls + '" style="' + c.style + '"' + (link && c.job ? ' data-go="zl/' + esc(c.job.id) + '"' : '') + '>' + esc(t) + '</span>'; }
+  return parts.map(function (pt) {
+    var c = chipFor(pt);
+    return '<span class="chip half ' + c.cls + '" style="' + c.style + '"' + (link && c.job ? ' data-go="zl/' + esc(c.job.id) + '"' : '') + '>½ ' + esc(pt) + '</span>';
+  }).join(' ');
 }
 function harmCards(from, len, dm, persons) {
   var h = '';
@@ -814,10 +937,10 @@ function harmCards(from, len, dm, persons) {
     if (!order.length && !d.uw) { h += (d.wd === 0 ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
     h += '<div class="day-b">';
     order.forEach(function (k) {
-      var g = groups[k], c = chipFor(g.t);
-      h += '<div class="ent" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chip ' + c.cls +
-        '" style="' + c.style + '">' + esc(g.t) + '</span><span class="who grow">' + esc(g.who.join(', ')) +
-        (c.job ? '<br><span class="tiny">' + esc([c.job.klient, c.job.lok].filter(Boolean).join(' – ')) + '</span>' : '') + '</span></div>';
+      var g = groups[k], js = cellJobs(g.t);
+      h += '<div class="ent" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' + chipHtml(g.t, !isAdmin()) +
+        '</span><span class="who grow">' + esc(g.who.join(', ')) +
+        js.map(function (j) { return '<br><span class="tiny">' + esc([j.klient, j.lok].filter(Boolean).join(' – ')) + '</span>'; }).join('') + '</span></div>';
     });
     if (d.uw && !S.onlyMe) h += '<div class="small muted" style="padding-top:6px">📝 ' + esc(d.uw) + '</div>';
     h += '</div></div>';
@@ -846,7 +969,8 @@ function openSchedEdit(ds, cols, text, job) {
     '<div class="fld"><label>Do (włącznie)</label><input type="date" id="s_to" value="' + ds + '"></div></div>';
   h += '<div class="fld"><label class="row" style="gap:6px;color:var(--text)"><input type="checkbox" id="s_wd" checked style="width:auto;min-height:0"> ' +
     'pomiń weekendy i święta (przy kilku dniach)</label></div>';
-  if (!isUw) h += '<div class="fld"><label>Zlecenie</label><select id="s_job"><option value="">— wybierz zlecenie —</option>' + jobsOpts + '</select></div>';
+  if (!isUw) h += '<div class="fld"><label>Zlecenie</label><select id="s_job"><option value="">— wybierz zlecenie —</option>' + jobsOpts + '</select></div>' +
+    '<div class="fld"><label>Drugie zlecenie tego dnia <span class="tiny">(wtedy po 0,5 dniówki na każde)</span></label><select id="s_job2"><option value="">— brak —</option>' + jobsOpts + '</select></div>';
   h += '<div class="fld"><label>' + (isUw ? 'Treść' : 'Albo wpisz tekst') + '</label><input id="s_text" value="' + esc(text) + '" placeholder="np. Bury, urlop, wolne">' +
     (isUw ? '' : '<div class="quick">' + S.lists.codes.map(function (c) { return '<button type="button" data-act="scode" data-v="' + esc(c) + '">' + esc(c) + '</button>'; }).join('') + '</div>') + '</div>';
   if (job) h += '<p class="small"><button class="link" data-go="zl/' + esc(job.id) + '">Otwórz zlecenie ' + esc(job.id) + ' – ' + esc(job.klient || job.lok) + '</button></p>';
@@ -854,9 +978,15 @@ function openSchedEdit(ds, cols, text, job) {
     (text ? '<button class="btn danger" data-act="sclear">Wyczyść</button>' : '') + '<button class="btn" data-act="close">Anuluj</button></div>';
   openSheet(h);
   S.sched = { cols: cols, isUw: isUw };
-  var sel = $('s_job');
-  if (sel && job && !job.arch) sel.value = job.id;
-  if (sel) sel.onchange = function () { var j = byId(S.jobs, sel.value); if (j && j.haslo) $('s_text').value = j.haslo; };
+  var sel = $('s_job'), sel2 = $('s_job2'), cj = text ? cellJobs(text) : [];
+  if (sel && cj[0] && !cj[0].arch) sel.value = cj[0].id;
+  if (sel2 && cj[1] && !cj[1].arch) sel2.value = cj[1].id;
+  var compose = function () {
+    var a = byId(S.jobs, sel.value), b = byId(S.jobs, sel2.value);
+    var t = [a && a.haslo, b && b.haslo && (!a || b.id !== a.id) ? b.haslo : ''].filter(Boolean).join(' / ');
+    if (t) $('s_text').value = t;
+  };
+  if (sel) { sel.onchange = compose; sel2.onchange = compose; }
 }
 function schedSave(clear) {
   var cols = S.sched.isUw ? [13] : Array.prototype.map.call(document.querySelectorAll('input[name=pc]:checked'), function (x) { return +x.value; });
@@ -894,7 +1024,7 @@ function jobCard(j, sel) {
     '</span><span class="grow b ell">' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.zakres || j.id) + '</span>' +
     (j.status ? '<span class="pill ' + stCls(j.status) + '">' + esc(j.status) + '</span>' : '') + '</div>' +
     (j.zakres ? '<div class="small clamp2" style="margin-top:4px">' + esc(j.zakres) + '</div>' : '') +
-    '<div class="meta">' + (dates ? '<span>📅 ' + dates + (j.dni ? ' · ' + j.dni + ' dni w harm.' : '') + '</span>' : (j.termin ? '<span>🗓 ' + esc(j.termin) + '</span>' : '')) +
+    '<div class="meta">' + (dates ? '<span>📅 ' + dates + (j.dni ? ' · ' + fmtDni(j.dni) + ' dni w harm.' : '') + '</span>' : (j.termin ? '<span>🗓 ' + esc(j.termin) + '</span>' : '')) +
     (j.ekipa ? '<span>👷 ' + esc(j.ekipa) + '</span>' : '') + (j.n ? '<span>📝 ' + j.n + '</span>' : '') +
     (j.ch ? '<span>💬 Pumble</span>' : '') + (j.arch && j.zamk ? '<span>zamknięte ' + fds(j.zamk) + '</span>' : '') +
     (j._tmp ? '<span class="wait">⏳ zapisywanie…</span>' : '<span class="tiny">' + esc(j.id) + '</span>') + '</div></div>';
@@ -950,7 +1080,7 @@ function jobDayList(j) {
   if (!h) return out;
   (S.schedule.days || []).forEach(function (d) {
     var kto = [];
-    S.schedule.persons.forEach(function (p) { var t = d.cells[p.c]; if (t && norm(t).indexOf(h) >= 0) kto.push(p.name); });
+    S.schedule.persons.forEach(function (p) { var t = d.cells[p.c]; if (t && norm(t).indexOf(h) >= 0) kto.push(p.name + (cellParts(t).length > 1 ? ' (½)' : '')); });
     if (kto.length) out.push({ d: d.d, kto: kto });
   });
   return out;
@@ -961,13 +1091,12 @@ function drawJob(j) {
   var h = '<div class="card"><div class="row small muted"><span>' + (tmp ? '⏳ zapisywanie…' : esc(j.id)) + '</span>' + (j.kat ? '<span class="kat ' + katCls(j.kat) + '">' + esc(j.kat) + '</span><span>' + esc(katName(j.kat)) + '</span>' : '') +
     '<span class="grow"></span>' + (j.status ? '<span class="pill ' + stCls(j.status) + '">' + esc(j.status) + '</span>' : '') + '</div>' +
     '<h2>' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.zakres) + '</h2>' +
+    contactHtml(j) +
     '<div class="btns" style="margin-top:10px">' +
-    (tel ? '<a class="btn sm" href="tel:' + esc(tel) + '" target="_top">📞 Zadzwoń</a>' : '') +
-    (j.lok ? '<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(j.lok) + '">🗺 Mapa</a>' : '') +
-    (j.ch ? '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(j.ch.link || 'https://app.pumble.com') + '">💬 Pumble</a>' : '') +
+    (j.ch ? '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(pumbleHref(j.ch)) + '">💬 Pumble</a>' : '') +
     (adm && !tmp ? '<button class="btn sm" data-act="editjob" data-id="' + esc(j.id) + '">✏️ Edytuj</button>' : '') + '</div></div>';
   h += '<div class="card"><dl class="kv">' +
-    kv('Zakres prac', j.zakres) + kv('Termin', j.termin) + kv('Ekipa', j.ekipa) + kv('Kontakt', j.kontakt) +
+    kv('Zakres prac', j.zakres) + kv('Termin', j.termin) + kv('Ekipa', j.ekipa) +
     kv('Od – do', j.od ? fd(j.od) + (j.do && j.do !== j.od ? ' – ' + fd(j.do) : '') : '') +
     kv('Hasło w harm.', j.haslo) + (adm ? kv('Uwagi', j.uwagi) : '') + (j.arch && j.zamk ? kv('Zamknięto', fd(j.zamk)) : '') + '</dl>';
   if (adm && !tmp) h += '<div class="row" style="margin-top:12px"><span class="small muted">Status:</span><select id="j_status" class="grow" style="border:1px solid var(--line);border-radius:10px;padding:8px">' +
@@ -977,7 +1106,7 @@ function drawJob(j) {
   if (adm && j.leadId) h += '<p class="small" style="margin-bottom:0">Z leada: <button class="link" data-go="ld/' + esc(j.leadId) + '">' + esc(j.leadId + ' – ' + (lead ? lead.temat : '')) + '</button></p>';
   h += '</div>';
   var dl = jobDayList(j);
-  h += '<div class="card"><h3>W harmonogramie' + (dl.length ? ' <span class="small muted">(' + dl.length + ' dni)</span>' : '') + '</h3>';
+  h += '<div class="card"><h3>W harmonogramie' + (dl.length ? ' <span class="small muted">(' + dl.length + ' dni · ' + fmtDni(j.dni) + ' dniówek)</span>' : '') + '</h3>';
   if (!j.haslo) h += '<div class="small muted">Zlecenie nie ma hasła w harmonogramie' + (adm ? ' – ustaw je w edycji, żeby dni podpinały się same.' : '.') + '</div>';
   else if (!dl.length) h += '<div class="small muted">Brak dni z hasłem „' + esc(j.haslo) + '”.</div>';
   else {
@@ -1083,7 +1212,7 @@ function scaleTo(im, max, q) {
 }
 function prepPhoto(file) {
   return loadImg(file).then(function (im) {
-    return { name: (file.name || 'foto').replace(/\.[^.]+$/, ''), full: scaleTo(im, 1600, 0.8), thumb: scaleTo(im, 360, 0.7) };
+    return { name: (file.name || 'foto').replace(/\.[^.]+$/, ''), full: scaleTo(im, 1400, 0.75), thumb: scaleTo(im, 320, 0.7) };
   });
 }
 /** Wpis od razu na liście; zdjęcia i tekst wysyłają się w tle (także po powrocie zasięgu). */
@@ -1143,7 +1272,7 @@ function showViewer() {
 function pumbleHtml(objId, ch) {
   if (!S.pumble) return isAdmin() ? '<div class="card small muted">💬 Pumble nie jest połączony – <button class="link" data-go="settings">połącz w ustawieniach</button>.</div>' : '';
   var h = '<div class="card"><div class="sec-h"><h3 style="margin:0">💬 Pumble' + (ch ? ' · #' + esc(ch.name) : '') + '</h3>';
-  if (ch) h += '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(ch.link || 'https://app.pumble.com') + '">Otwórz</a>';
+  if (ch) h += '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(pumbleHref(ch)) + '">Otwórz w Pumble</a>';
   h += '</div>';
   if (!ch) {
     h += '<div class="small muted">Brak połączonego kanału.</div>';
@@ -1241,14 +1370,15 @@ function jobForm(j, title, actionHtml) {
     '<div class="two">' + fld('Termin (miesiąc)', sel('f_termin', S.lists.terminy, j.termin || nowMonthTerm(), true)) + fld('Ekipa', sel('f_ekipa', S.lists.ekipy, j.ekipa, true)) + '</div>' +
     '<div class="two">' + fld('Klient / inwestor', inp('f_klient', j.klient)) + fld('Lokalizacja', inp('f_lok', j.lok)) + '</div>' +
     fld('Zakres prac', '<textarea id="f_zakres">' + esc(j.zakres || '') + '</textarea>') +
-    fld('Kontakt (tel. / e-mail)', inp('f_kontakt', j.kontakt)) +
+    '<div class="two">' + fld('Telefon do klienta', inp('f_kontakt', j.kontakt, 'np. 600 100 200', 'tel')) +
+    fld('Adres (do nawigacji)', inp('f_adres', j.adres, 'ulica nr, miejscowość')) + '</div>' +
     fld('Hasło w harmonogramie <span class="tiny">(krótkie słowo, które wpisujesz w harmonogram, np. nazwisko)</span>', inp('f_haslo', j.haslo, 'np. Brzezicki')) +
     fld('Uwagi (widzą tylko admini)', '<textarea id="f_uwagi">' + esc(j.uwagi || '') + '</textarea>') + actionHtml;
 }
 function jobFromForm(id) {
   var g = function (k) { var e = $(k); return e ? e.value : ''; };
   return { id: id || '', kat: g('f_kat'), status: g('f_status'), termin: g('f_termin'), ekipa: g('f_ekipa'), klient: g('f_klient'),
-           lok: g('f_lok'), zakres: g('f_zakres'), kontakt: g('f_kontakt'), haslo: g('f_haslo'), uwagi: g('f_uwagi') };
+           lok: g('f_lok'), zakres: g('f_zakres'), kontakt: g('f_kontakt'), haslo: g('f_haslo'), uwagi: g('f_uwagi'), adres: g('f_adres') };
 }
 function editJob(id) {
   var j = id ? byId(S.jobs, id) : {};
@@ -1340,7 +1470,7 @@ function drawLead(l) {
     '<span class="grow"></span>' + (l.status ? '<span class="pill ' + stCls(l.status) + '">' + esc(l.status) + '</span>' : '') + '</div><h2>' + esc(l.temat || l.klient) + '</h2>' +
     '<div class="meta" style="font-size:14px">' + nextTxt(l) + (l.ostatni ? '<span>ostatni kontakt: ' + fd(l.ostatni) + '</span>' : '') + '</div>' +
     '<div class="btns" style="margin-top:10px">' + (tel ? '<a class="btn sm" href="tel:' + esc(tel) + '" target="_top">📞 Zadzwoń</a>' : '') +
-    (l.ch ? '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(l.ch.link || 'https://app.pumble.com') + '">💬 Pumble</a>' : '') +
+    (l.ch ? '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(pumbleHref(l.ch)) + '">💬 Pumble</a>' : '') +
     (tmp ? '' : '<button class="btn sm" data-act="editlead" data-id="' + esc(l.id) + '">✏️ Edytuj</button>' +
     '<button class="btn sm acc" data-act="tojob" data-id="' + esc(l.id) + '">→ Utwórz zlecenie</button>') + '</div></div>';
   if (!tmp) h += '<div class="card"><h3>Zapisz kontakt z klientem</h3><div class="fld"><label>Co ustalono</label><textarea id="c_note" placeholder="np. klient czeka na ofertę, oddzwonić po weekendzie"></textarea></div>' +
@@ -1422,6 +1552,263 @@ function toJobSave(id) {
   S.zlTab = 'akt'; go('zl/' + tmpId);
 }
 
+// ------------------------------------------------------------------------------------------------ na jutro (ekipa)
+/** Dzień listy: przed 12:00 – dziś, od 12:00 – następny dzień (dni wolne bez wpisów ekipy pomijane). */
+function jutroDay(crew) {
+  var today = S.today || todayLocal(), d = new Date().getHours() < 12 ? today : addD(today, 1), dm = dayMap(), cols = crewCols(crew);
+  for (var i = 0; i < 7; i++) {
+    var x = dm[d];
+    if (!x || x.wd === 1 || cols.some(function (c) { return x.cells[c]; })) break;
+    d = addD(d, 1);
+  }
+  return d;
+}
+function dayName(d) { return d === S.today ? 'dziś' : (d === addD(S.today, 1) ? 'jutro' : DOWL[pd(d).getDay()]); }
+function allCrews() {
+  var crews = Object.keys(S.crews || {});
+  (S.lists.ekipy || []).forEach(function (e) { if (norm(e) !== 'mieszane' && crews.indexOf(e) < 0) crews.push(e); });
+  return crews;
+}
+function myCrew() { return isAdmin() ? (S.jutroCrew || (S.user.ekipa || '') || allCrews()[0] || '') : (S.user.ekipa || ''); }
+function crewCols(crew) {
+  var names = ((S.crews || {})[crew] || []).map(function (m) { return norm(m.person); }).filter(Boolean), cols = [];
+  if (!names.length && S.user.person && (!crew || crew === S.user.ekipa)) names = [norm(S.user.person)];
+  (S.schedule.persons || []).forEach(function (p) { if (names.indexOf(norm(p.name)) >= 0) cols.push(p.c); });
+  return cols;
+}
+function crewChecks(crew, day) { return (S.checks || []).filter(function (c) { return c.crew === crew && c.day === day; }); }
+function jutroOpen() { var crew = myCrew(); if (!crew || !S.schedule) return 0; return crewChecks(crew, jutroDay(crew)).filter(function (c) { return !c.done; }).length; }
+function jutroJobs(crew, day) {
+  var d = dayMap()[day], out = [], who = [];
+  if (!d) return { jobs: out, who: who };
+  crewCols(crew).forEach(function (c) {
+    var t = d.cells[c], p = (S.schedule.persons || []).filter(function (x) { return x.c === c; })[0];
+    if (!t) return;
+    who.push({ name: p ? p.name : '', text: t });
+    cellJobs(t).forEach(function (j) { if (out.indexOf(j) < 0) out.push(j); });
+  });
+  return { jobs: out, who: who };
+}
+function loadTomorrow(ids) {
+  var key = ids.join(',');
+  if (!ids.length || (S.tomorrowKey === key && Date.now() - (S.tomorrowAt || 0) < 60000) || S.tomorrowLoading) return;
+  S.tomorrowLoading = true;
+  api('apiTomorrow', ids).then(function (r) {
+    S.tomorrow = r; S.tomorrowKey = key; S.tomorrowAt = Date.now();
+    Object.keys(r.diary || {}).forEach(function (id) { if (!S.diary[id]) { S.diary[id] = r.diary[id]; } });
+    if (S.route === 'jutro') rerender();
+  }).catch(function (e) { if (!e.net) toast(e.message, true); }).then(function () { S.tomorrowLoading = false; });
+}
+function renderJutro() {
+  var crew = myCrew(), day = jutroDay(crew), dt = pd(day);
+  setTop('Na ' + (day === S.today ? 'dziś' : (day === addD(S.today, 1) ? 'jutro' : DOWL[dt.getDay()])), false);
+  var h = '';
+  if (isAdmin()) {
+    var crews = allCrews();
+    if (crews.length) h += '<div class="seg">' + crews.map(function (c) { return '<button class="' + (c === crew ? 'on' : '') + '" data-act="jcrew" data-c="' + esc(c) + '">' + esc(c) + '</button>'; }).join('') + '</div>';
+  }
+  h += '<div class="dayhead"><div><div class="big">' + DOWL[dt.getDay()] + ' ' + fd(day) + '</div><div class="small muted">' + (crew ? '🚐 ' + esc(crew) : 'bez przypisanej ekipy') +
+    ' · lista przełącza się na kolejny dzień o 12:00</div></div></div>';
+  h += pushBanner();
+  // lista do zabrania
+  if (crew) {
+    h += '<div class="card"><h3>📦 Do zabrania z magazynu <span class="small muted" id="chk_cnt">' + chkCount(crew, day) + '</span></h3>' +
+      '<div class="row" style="margin-bottom:10px"><input id="chk_text" class="grow addin" placeholder="np. drabina 5 m, rury 16 mm, wiertarka SDS…" maxlength="300">' +
+      '<button class="btn pri" data-act="chkadd">Dodaj</button></div><div id="chk_items">' + chkItemsHtml(crew, day) + '</div></div>';
+  } else h += '<div class="card small muted">Nie masz przypisanej ekipy – administrator ustawia ją w Więcej → Użytkownicy. Poniżej Twoje zlecenia z harmonogramu.</div>';
+  // kto i gdzie
+  var jj = jutroJobs(crew, day);
+  h += '<div class="card"><h3>👷 Harmonogram ' + esc(dayName(day)) + '</h3>' + (jj.who.length ? jj.who.map(function (w) {
+    return '<div class="row small" style="padding:4px 0;border-bottom:1px dashed var(--line)"><b style="min-width:90px">' + esc(w.name) + '</b><span class="grow">' + chipHtml(w.text, true) + '</span></div>';
+  }).join('') : '<div class="small muted">Brak wpisów w harmonogramie.</div>') + '</div>';
+  // zlecenia: adres, telefon, dziennik, Pumble
+  var T = S.tomorrow || {};
+  jj.jobs.forEach(function (j) {
+    var dz = (T.diary && T.diary[j.id]) || S.diary[j.id] || [], pm = T.pumble && T.pumble[j.id];
+    h += '<div class="card jcard"><div class="row"><span class="kat ' + katCls(j.kat) + '">' + esc(j.kat || '–') + '</span><b class="grow ell">' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.id) + '</b>' +
+      '<button class="btn sm" data-go="zl/' + esc(j.id) + '">Otwórz</button></div>' + (j.zakres ? '<div class="small" style="margin-top:6px">' + esc(j.zakres) + '</div>' : '') +
+      contactHtml(j) +
+      '<div class="sub">📝 Dziennik' + (dz.length ? '' : ' <span class="muted small">– brak wpisów</span>') + '</div>' +
+      dz.slice(0, 3).map(function (e) { return '<div class="mini"><span class="tiny muted">' + esc(e.author) + ' · ' + esc(e.when) + '</span><div class="small">' + esc(e.text || (e.photos && e.photos.length ? '📷 zdjęcia: ' + e.photos.length : '')) + '</div></div>'; }).join('');
+    if (j.ch) h += '<div class="sub">💬 Pumble · #' + esc(j.ch.name) + ' <a class="link small" target="_blank" rel="noopener" href="' + esc(pumbleHref(j.ch)) + '">otwórz</a></div>' +
+      (pm ? (pm.length ? pm.map(function (m) { return '<div class="mini"><span class="tiny muted">' + esc(m.a) + ' · ' + esc(m.t) + '</span><div class="small">' + esc(m.x) + '</div></div>'; }).join('') : '<div class="small muted">Brak wiadomości.</div>')
+        : '<div class="small muted"><span class="spin sm"></span> wczytuję…</div>');
+    h += '</div>';
+  });
+  if (!jj.jobs.length && jj.who.length) h += '<div class="card small muted">Wpisy w harmonogramie nie pasują do żadnego zlecenia (hasło).</div>';
+  $('view').innerHTML = h;
+  loadTomorrow(jj.jobs.map(function (j) { return j.id; }));
+}
+function chkCount(crew, day) {
+  var items = crewChecks(crew, day), open = items.filter(function (c) { return !c.done; }).length;
+  return items.length ? '(' + open + ' z ' + items.length + ' do zabrania)' : '';
+}
+function chkItemsHtml(crew, day) {
+  var items = crewChecks(crew, day), h = '';
+  if (!items.length) return '<div class="small muted">Lista pusta – dopisz rzeczy nietypowe, które trzeba zabrać.</div>';
+  items.slice().sort(function (a, b) { return (a.done - b.done) || ((a.at || '~') < (b.at || '~') ? -1 : 1); }).forEach(function (c) {
+    h += '<label class="chk' + (c.done ? ' done' : '') + (c._tmp ? ' tmp' : '') + '"><input type="checkbox" data-act="chktog" data-id="' + esc(c.id) + '"' + (c.done ? ' checked' : '') + '>' +
+      '<span class="grow"><span class="t">' + esc(c.text) + '</span><span class="tiny muted">' + esc(c.by) + (c._tmp ? ' · ⏳ zapisywanie…' : '') + (c.done && c.doneBy ? ' · zabrał(a) ' + esc(c.doneBy) : '') + '</span></span>' +
+      (c.by === S.user.name || isAdmin() ? '<button class="link small muted" data-act="chkdel" data-id="' + esc(c.id) + '">usuń</button>' : '') + '</label>';
+  });
+  return h;
+}
+/** Odświeżenie samej listy, gdy ktoś pisze w polu „dodaj” (klawiatura zostaje otwarta). */
+function refreshAddLists() {
+  if (S.route === 'jutro' && $('chk_items')) {
+    var crew = myCrew(), day = jutroDay(crew);
+    $('chk_items').innerHTML = chkItemsHtml(crew, day); $('chk_cnt').textContent = chkCount(crew, day);
+    renderNav(); return true;
+  }
+  if (S.route === 'zakupy' && $('buy_open')) { $('buy_open').innerHTML = buyOpenHtml(); renderNav(); return true; }
+  return false;
+}
+function checkAdd() {
+  var t = $('chk_text'), text = t ? t.value.trim() : '';
+  if (!text) return toast('Wpisz, co trzeba zabrać.', true);
+  var crew = myCrew(); if (!crew) return toast('Brak ekipy.', true);
+  t.value = '';
+  enqueue('chk_add', { crew: crew, day: jutroDay(crew), text: text, tmpId: 'tmp' + uid() });
+  if (!refreshAddLists()) { renderJutro(); renderNav(); }
+  t.focus();
+}
+function checkToggle(id, done) { enqueue('chk_tog', { id: id, done: !!done }); renderJutro(); renderNav(); }
+function checkDelete(id, ok) {
+  if (!ok) return ask('Usunąć tę pozycję z listy?', function () { checkDelete(id, true); }, 'danger');
+  enqueue('chk_del', { id: id }); renderJutro(); renderNav();
+}
+
+// ------------------------------------------------------------------------------------------------ zakupy
+function buyCard(b) {
+  var adm = isAdmin(), mine = b.by === S.user.name, st = norm(b.status);
+  var meta = [b.sklep, b.grupa, b.kwota !== '' && b.kwota !== undefined ? money(b.kwota) : ''].filter(Boolean).join(' · ');
+  var h = '<div class="item buy' + (b._tmp ? ' tmp' : '') + (b.arch ? ' done' : '') + '"><div class="row"><span class="grow b">' + esc(b.co) + '</span>' +
+    (b.status ? '<span class="pill ' + stCls(b.status) + '">' + esc(b.status) + '</span>' : '') + '</div>' +
+    (b.uwagi ? '<div class="small" style="margin-top:4px">' + esc(b.uwagi) + '</div>' : '') +
+    '<div class="meta">' + (b.by ? '<span>✍️ ' + esc(b.by) + '</span>' : (b.lista ? '<span>' + esc(b.lista) + '</span>' : '')) + (meta ? '<span>' + esc(meta) + '</span>' : '') +
+    (b.arch && b.zamk ? '<span>kupione ' + fds(b.zamk) + '</span>' : '') + (b._tmp ? '<span class="wait">⏳ zapisywanie…</span>' : '') + '</div>';
+  var btn = '';
+  if (adm && !b.arch && !b._tmp) {
+    btn += '<button class="btn sm acc" data-act="buyset" data-id="' + esc(b.id) + '" data-s="' + esc(kupioneStatus()) + '">✓ Kupione</button>';
+    if (st !== 'zamówione' && (S.lists.statusK || []).indexOf('Zamówione') >= 0) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="Zamówione">Zamówione</button>';
+    btn += '<button class="btn sm" data-act="buyedit" data-id="' + esc(b.id) + '">✏️</button>';
+  }
+  if (adm && b.arch && !b._tmp) btn += '<button class="btn sm" data-act="buyset" data-id="' + esc(b.id) + '" data-s="' + esc((S.lists.statusK || [])[0] || 'Do kupienia') + '">↩ Przywróć</button>';
+  if (mine && !b._tmp) btn += '<button class="btn sm danger" data-act="buydel" data-id="' + esc(b.id) + '">Usuń</button>';
+  return h + (btn ? '<div class="btns" style="margin-top:8px">' + btn + '</div>' : '') + '</div>';
+}
+function kupioneStatus() { var l = S.lists.statusK || []; return l.filter(function (x) { return norm(x) === 'kupione'; })[0] || l[l.length - 1] || 'Kupione'; }
+function renderBuys() {
+  setTop('Zakupy', false);
+  var done = (S.buys || []).filter(function (b) { return b.arch; });
+  done.sort(function (a, b) { return (b.zamk || '').localeCompare(a.zamk || ''); });
+  var h = '<div class="card"><h3>🛒 Dopisz do kupienia</h3><div class="row"><input id="buy_co" class="grow addin" placeholder="Co kupić (np. pianka montażowa 3 szt.)" maxlength="200">' +
+    '<button class="btn pri" data-act="buyadd">Dodaj</button></div><input id="buy_uw" class="addin" style="width:100%;margin-top:8px" placeholder="Uwagi (opcjonalnie: na które zlecenie, gdzie)" maxlength="300">' +
+    '<div class="tiny muted" style="margin-top:6px">' + (isAdmin() ? 'Pracownicy dopisują, Ty oznaczasz „Kupione”. Pozycja trafia do arkusza Zakupy.' : 'Administrator dostanie powiadomienie. Usunąć możesz tylko swoje wpisy.') + '</div></div>';
+  h += pushBanner(true);
+  h += '<div id="buy_open">' + buyOpenHtml() + '</div>';
+  if (done.length) {
+    h += '<div class="grp"><button class="link" data-act="buydone">' + (S.buyShowDone ? '▾' : '▸') + ' Kupione – ostatnie (' + done.length + ')</button></div>';
+    if (S.buyShowDone) h += '<div class="list">' + done.slice(0, 40).map(buyCard).join('') + '</div>';
+  }
+  $('view').innerHTML = h;
+}
+function buyOpenHtml() {
+  var open = (S.buys || []).filter(function (b) { return !b.arch; });
+  open.sort(function (a, b) { return (norm(a.status) === 'zamówione') - (norm(b.status) === 'zamówione') || (!!b._tmp - !!a._tmp) || (a.id < b.id ? 1 : -1); });
+  return '<div class="grp">Do kupienia (' + open.length + ')</div><div class="list">' + (open.length ? open.map(buyCard).join('') : '<div class="empty">Nic do kupienia 🎉</div>') + '</div>';
+}
+function buyAdd() {
+  var co = ($('buy_co') || {}).value || '', uw = ($('buy_uw') || {}).value || '';
+  if (!co.trim()) return toast('Wpisz, co trzeba kupić.', true);
+  enqueue('buy_add', { co: co.trim(), uwagi: uw.trim(), tmpId: 'tmp' + uid() });
+  $('buy_co').value = ''; $('buy_uw').value = '';
+  renderBuys(); renderNav();
+  toast('Dopisano – ' + (isAdmin() ? 'zapisuję w arkuszu Zakupy.' : 'administrator dostanie powiadomienie.'));
+}
+function buySet(id, patch) {
+  enqueue('buy_set', { id: id, patch: patch });
+  renderBuys(); renderNav();
+  if (patch.status && norm(patch.status) === 'kupione') toast('Oznaczono jako kupione.');
+}
+function buyDelete(id, ok) {
+  if (!ok) return ask('Usunąć tę pozycję z listy zakupów?', function () { buyDelete(id, true); }, 'danger');
+  enqueue('buy_del', { id: id }); renderBuys(); renderNav();
+}
+function buyEdit(id) {
+  var b = byId(S.buys, id); if (!b) return;
+  openSheet('<h3>Zakup <button class="btn sm" data-act="close">✕</button></h3>' + fld('Co', inp('be_co', b.co)) +
+    '<div class="two">' + fld('Sklep', inp('be_sklep', b.sklep)) + fld('Grupa', sel('be_grupa', S.lists.grupyK || [], b.grupa, true)) + '</div>' +
+    '<div class="two">' + fld('Kwota (zł)', inp('be_kwota', b.kwota, '', 'text')) + fld('Status', sel('be_status', S.lists.statusK || [], b.status)) + '</div>' +
+    fld('Uwagi', inp('be_uwagi', b.uwagi)) + '<div class="btns"><button class="btn pri" data-act="buysave" data-id="' + esc(id) + '">Zapisz</button></div>');
+}
+function buyEditSave(id) {
+  var g = function (k) { return ($(k) || {}).value || ''; };
+  closeSheet();
+  buySet(id, { co: g('be_co'), sklep: g('be_sklep'), grupa: g('be_grupa'), kwota: g('be_kwota'), status: g('be_status'), uwagi: g('be_uwagi') });
+}
+
+// ------------------------------------------------------------------------------------------------ powiadomienia push (aplikacja instalowana)
+function pushSupported() { return MODE === 'pwa' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+function pushState() {
+  if (MODE !== 'pwa') return 'browser';
+  if (isIOS() && !standalone()) return 'install';
+  if (!pushSupported()) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  return Notification.permission === 'granted' && lsGet('push_ok_' + KEY) ? 'on' : 'off';
+}
+function pushBanner(small) {
+  var st = pushState();
+  if (st === 'on' || st === 'unsupported') return '';
+  if (st === 'browser') return small ? '' : '<div class="card small muted">🔔 Powiadomienia działają w aplikacji zainstalowanej na telefonie – ' + (S.pwaUrl ? '<button class="link" data-go="help">jak zainstalować</button>' : 'poproś administratora o link') + '.</div>';
+  if (st === 'install') return '<div class="card small">🔔 Żeby dostawać powiadomienia na iPhonie, dodaj aplikację do ekranu początkowego (Udostępnij → Do ekranu początkowego) i otwórz ją z ikony.</div>';
+  if (st === 'denied') return small ? '' : '<div class="card small">🔕 Powiadomienia są zablokowane – włącz je w ustawieniach telefonu dla aplikacji ETNER.</div>';
+  return '<div class="card pushon"><div class="grow small"><b>🔔 Włącz powiadomienia</b><br>Przypomnienie rano o rzeczach do zabrania i nowe wpisy na liście' + (isAdmin() ? ' i w zakupach' : '') + '.</div><button class="btn acc" data-act="pushon">Włącz</button></div>';
+}
+function b64u2u8(s) {
+  var b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), u = new Uint8Array(b.length);
+  for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  return u;
+}
+function pushSubscribe(silent) {
+  if (!S.vapid) return Promise.reject(new Error('Brak klucza powiadomień – odśwież aplikację.'));
+  return navigator.serviceWorker.ready.then(function (reg) {
+    return reg.pushManager.getSubscription().then(function (sub) {
+      return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u2u8(S.vapid) });
+    });
+  }).then(function (sub) {
+    return api('apiPushSubscribe', sub.toJSON(), (navigator.userAgent || '').slice(0, 100));
+  }).then(function () { lsSet('push_ok_' + KEY, Date.now()); if (!silent) { toast('Powiadomienia włączone.'); rerender(); } });
+}
+function pushEnable() {
+  if (!pushSupported()) return toast('Ten telefon nie obsługuje powiadomień w tej aplikacji.', true);
+  Notification.requestPermission().then(function (perm) {
+    if (perm !== 'granted') { toast('Nie zezwolono na powiadomienia.', true); rerender(); return; }
+    return pushSubscribe(false);
+  }).catch(fail);
+}
+function pushKeepAlive() {
+  if (!pushSupported() || Notification.permission !== 'granted') return;
+  var last = lsGet('push_ok_' + KEY) || 0;
+  if (Date.now() - last < 20 * 3600000) return;
+  pushSubscribe(true).catch(function () {});
+}
+
+// ------------------------------------------------------------------------------------------------ dzienniki z wyprzedzeniem
+function prefetch() {
+  if (S.prefetching || (S.prefetchAt && Date.now() - S.prefetchAt < 120000 && S.prefetchV === S.v)) return;
+  S.prefetching = true;
+  api('apiPrefetch').then(function (r) {
+    var now = Date.now();
+    Object.keys(r.diary || {}).forEach(function (id) { S.diary[id] = r.diary[id]; S.diaryAt[id] = now; });
+    S.prefetchAt = now; S.prefetchV = S.v;
+    idbPut('diary_' + KEY, S.diary);
+    var p = S.route.split('/');
+    if ((p[0] === 'zl' || p[0] === 'ld') && p[1]) rerenderDetail();
+    if (p[0] === 'jutro') rerender();
+  }).catch(function () {}).then(function () { S.prefetching = false; });
+}
+
 // ------------------------------------------------------------------------------------------------ więcej
 var installEvt = null;
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvt = e; if (S.route === 'more') render(); });
@@ -1436,7 +1823,10 @@ function renderMore() {
     h += '<div class="item" data-go="users"><b>👥 Użytkownicy i linki dostępu</b><div class="small muted">Dodaj pracownika, wyślij mu link, wyłącz dostęp.</div></div>';
     h += '<div class="item" data-go="settings"><b>⚙️ Ustawienia i Pumble</b><div class="small muted">Klucz API Pumble, powiadomienia, adresy aplikacji, linki do arkusza i zdjęć.</div></div>';
   }
-  h += '<div class="item" data-go="help"><b>📱 Aplikacja na telefonie / komputerze</b><div class="small muted">Jak zainstalować aplikację (ikona na ekranie).</div></div>';
+  h += '<div class="item" data-go="help"><b>📱 Aplikacja na telefonie</b><div class="small muted">' + (MODE === 'pwa' && standalone() ? 'Zainstalowana ✓' : 'Jak zainstalować aplikację (ikona na ekranie).') + '</div></div>';
+  var ps = pushState();
+  if (ps === 'on') h += '<div class="item" data-act="pushtest"><b>🔔 Powiadomienia włączone</b><div class="small muted">Stuknij, żeby wysłać próbne powiadomienie na ten telefon.</div></div>';
+  else if (ps === 'off') h += '<div class="item" data-act="pushon"><b>🔔 Włącz powiadomienia</b><div class="small muted">Przypomnienie rano o rzeczach do zabrania' + (isAdmin() ? ', nowe zakupy' : '') + '.</div></div>';
   h += '<div class="item" data-act="reload"><b>⟳ Odśwież dane</b><div class="small muted">Wczytaj wszystko od nowa z arkusza (gdy coś zmieniono ręcznie).</div></div></div>';
   var pend = S.outbox.length;
   h += '<p class="tiny muted" style="text-align:center">ETNER · aplikacja ' + esc(BOOT.version || CFG.version || S.serverVersion || '') + (MODE === 'pwa' ? ' · zainstalowana' : '') +
@@ -1445,11 +1835,28 @@ function renderMore() {
 }
 function renderHelp() {
   setTop('Aplikacja na telefonie', true);
-  $('view').innerHTML = '<div class="card"><h3>Telefon z Androidem (Chrome)</h3><ol class="small"><li>Otwórz swój link do aplikacji w Chrome.</li>' +
-    '<li>Stuknij ⋮ (prawy górny róg) → <b>Zainstaluj aplikację</b> albo <b>Dodaj do ekranu głównego</b>.</li><li>Na ekranie pojawi się ikona ETNER – otwiera się bez paska przeglądarki.</li></ol></div>' +
-    '<div class="card"><h3>iPhone (Safari)</h3><ol class="small"><li>Otwórz link w Safari.</li><li>Stuknij <b>Udostępnij</b> (kwadrat ze strzałką) → <b>Do ekranu początkowego</b>.</li></ol></div>' +
-    '<div class="card"><h3>Komputer (Chrome / Edge)</h3><ol class="small"><li>Otwórz link.</li><li>Kliknij ikonę instalacji na końcu paska adresu (monitor ze strzałką) albo ⋮ → <b>Zainstaluj ETNER</b>.</li></ol>' +
-    '<p class="small muted">Aplikacja pamięta dane w telefonie: otwiera się od razu, a zapisy bez zasięgu wyśle, gdy wróci internet. Link jest osobisty – nie przekazuj go innym.</p></div>';
+  var h = '', link = S.pwaUrl ? S.pwaUrl + (S.pwaUrl.indexOf('?') >= 0 ? '&' : '?') + 'u=' + encodeURIComponent(TOKEN) : '';
+  if (MODE === 'pwa' && standalone()) {
+    h += '<div class="card"><h3>✅ Aplikacja jest zainstalowana</h3><p class="small">Otwierasz ją z ikony ETNER na ekranie. Dane są zapisane w telefonie, a zmiany wysyłają się w tle – także po powrocie zasięgu.</p></div>';
+  } else if (MODE === 'gas') {
+    h += '<div class="card"><h3>📲 Zainstaluj aplikację</h3><p class="small">To jest wersja w przeglądarce (strona Google) – nie da się jej zainstalować jak aplikacji ani włączyć w niej powiadomień.</p>' +
+      (link ? '<p class="small"><b>Otwórz ten link na telefonie</b> (najlepiej skopiuj go do Chrome na Androidzie albo Safari na iPhonie) i zainstaluj według instrukcji, która tam się pokaże:</p>' +
+        '<div class="copyfld"><input readonly value="' + esc(link) + '"><button class="btn sm" data-act="copy" data-v="' + esc(link) + '">Kopiuj</button></div>' +
+        '<div class="btns" style="margin-top:10px"><a class="btn pri" href="' + esc(link) + '" target="_blank" rel="noopener">Otwórz wersję do instalacji</a></div>'
+        : '<p class="small muted">Administrator jeszcze nie ustawił adresu aplikacji do instalacji.</p>') + '</div>';
+  } else {
+    var ios = isIOS(), and = isAndroid();
+    if (installEvt) h += '<div class="card"><button class="btn install" data-act="install" style="width:100%">📲 Zainstaluj aplikację ETNER</button></div>';
+    if (ios) h += '<div class="card"><h3>iPhone</h3><ol class="small"><li>Ten link musi być otwarty w <b>Safari</b> (nie w Pumble ani Messengerze – tam stuknij „Otwórz w Safari”).</li>' +
+      '<li>Stuknij <b>Udostępnij</b> (kwadrat ze strzałką w górę) na dole ekranu.</li><li>Przewiń i wybierz <b>Do ekranu początkowego</b> → <b>Dodaj</b>.</li>' +
+      '<li>Otwieraj aplikację z ikony ETNER. Jeśli zapyta o link – wklej swój link do aplikacji.</li></ol></div>';
+    else if (and) h += '<div class="card"><h3>Android (Chrome)</h3><ol class="small"><li>Otwórz ten link w <b>Chrome</b>.</li>' +
+      '<li>Stuknij <b>⋮</b> (prawy górny róg) → <b>Zainstaluj aplikację</b> (albo „Dodaj do ekranu głównego” → „Zainstaluj”).</li>' +
+      '<li>Ikona ETNER pojawi się na ekranie i w szufladzie aplikacji – otwiera się bez paska przeglądarki.</li></ol></div>';
+    else h += '<div class="card"><h3>Komputer (Chrome / Edge)</h3><ol class="small"><li>Kliknij ikonę instalacji na końcu paska adresu (monitor ze strzałką) albo ⋮ → <b>Zainstaluj ETNER</b>.</li></ol></div>';
+  }
+  h += '<div class="card small muted">Link jest osobisty – działa jak hasło, nie przekazuj go innym.</div>';
+  $('view').innerHTML = h;
 }
 function renderUsers() {
   setTop('Użytkownicy', true);
@@ -1458,7 +1865,7 @@ function renderUsers() {
   S.users.forEach(function (u) {
     var link = u.app || u.link;
     h += '<div class="card"><div class="row"><div class="grow"><b>' + esc(u.name) + '</b> <span class="pill ' + (u.role === 'admin' ? 'st-planowane' : '') + '">' + (u.role === 'admin' ? 'admin' : 'pracownik') + '</span>' +
-      (u.active ? '' : ' <span class="pill st-anulowane">wyłączony</span>') + '<div class="small muted">' + (u.person ? 'harmonogram: ' + esc(u.person) + ' · ' : '') +
+      (u.active ? '' : ' <span class="pill st-anulowane">wyłączony</span>') + '<div class="small muted">' + (u.ekipa ? '🚐 ' + esc(u.ekipa) + ' · ' : '') + (u.person ? 'harmonogram: ' + esc(u.person) + ' · ' : '') +
       (u.seen ? 'ostatnio: ' + esc(u.seen) : 'jeszcze nie logował(a) się') + '</div></div><button class="btn sm" data-act="useredit" data-id="' + esc(u.id) + '">Edytuj</button></div>' +
       (u.active ? (link ? '<div class="copyfld" style="margin-top:8px"><input readonly value="' + esc(link) + '"><button class="btn sm" data-act="copy" data-v="' + esc(link) + '">Kopiuj</button></div>'
         : '<div class="small" style="color:var(--bad);margin-top:6px">Brak adresu aplikacji – wpisz go w Ustawieniach.</div>') : '') + '</div>';
@@ -1472,15 +1879,16 @@ function userSheet(id) {
     fld('Imię (tak będzie podpisywać wpisy)', inp('u_name', u.name)) +
     '<div class="two">' + fld('Rola', '<select id="u_role"><option value="pracownik"' + (u.role !== 'admin' ? ' selected' : '') + '>pracownik</option><option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>administrator</option></select>') +
     fld('Osoba w harmonogramie', sel('u_person', persons, u.person, true)) + '</div>' +
+    fld('Ekipa <span class="tiny">(lista „Na jutro” i powiadomienia ekipy)</span>', sel('u_ekipa', (S.lists.ekipy || []).filter(function (x) { return norm(x) !== 'mieszane'; }), u.ekipa, true)) +
     (id ? '<div class="checks" style="margin-bottom:12px"><label><input type="checkbox" id="u_active"' + (u.active ? ' checked' : '') + '> aktywny</label><label><input type="checkbox" id="u_new"> nowy link (stary przestanie działać)</label></div>' : '') +
     '<div class="tiny muted" style="margin-bottom:10px">Pracownik widzi harmonogram i zlecenia (bez uwag z kwotami), dodaje wpisy i zdjęcia. Administrator widzi wszystko, także leady.</div>' +
     '<div class="btns"><button class="btn pri" data-act="usersave" data-id="' + esc(id || '') + '">Zapisz</button></div>');
 }
 function userSave(id) {
-  var d = { id: id, name: $('u_name').value, role: $('u_role').value, person: $('u_person').value,
+  var d = { id: id, name: $('u_name').value, role: $('u_role').value, person: $('u_person').value, ekipa: $('u_ekipa').value,
             active: id ? $('u_active').checked : true, newToken: id ? $('u_new').checked : false };
   busy(true);
-  api('apiUserSave', d).then(function (u) { S.users = u; closeSheet(); toast('Zapisano.'); renderUsers(); }).catch(fail).then(function () { busy(false); });
+  api('apiUserSave', d).then(function (u) { S.users = u; closeSheet(); toast('Zapisano.'); renderUsers(); sync(); }).catch(fail).then(function () { busy(false); });
 }
 function renderSettings() {
   setTop('Ustawienia', true);
@@ -1491,6 +1899,8 @@ function renderSettings() {
     '<input id="st_key" type="password" placeholder="' + (s.pumble ? '•••••• (zapisany – wpisz nowy, żeby zmienić)' : 'wklej klucz') + '"></div>' +
     '<div class="checks" style="margin-bottom:12px"><label><input type="checkbox" id="st_notify"' + (s.notify ? ' checked' : '') + '> wysyłaj na kanał zlecenia powiadomienia (nowe wpisy, zmiana statusu)</label></div>' +
     '<div class="btns"><button class="btn pri" data-act="stsave">Zapisz i sprawdź</button>' + (s.pumble ? '<button class="btn danger" data-act="stunlink">Odłącz Pumble</button>' : '') + '</div></div>' +
+    '<div class="card"><h3>🔔 Powiadomienia</h3><div class="fld"><label>Przypomnienie rano dla ekip o rzeczach do zabrania (gdy lista nie jest pusta)</label>' +
+    '<input id="st_pushat" type="time" value="' + esc(s.pushAt || '07:00') + '" style="max-width:160px"></div><button class="btn" data-act="stpush">Zapisz godzinę</button></div>' +
     '<div class="card"><h3>🔗 Adresy aplikacji</h3><div class="fld"><label>Adres wdrożenia Apps Script (kończy się na /exec)</label><input id="st_url" value="' + esc(s.appUrl) + '"></div>' +
     '<div class="fld"><label>Adres aplikacji na telefon (instalowanej) – z niego powstają linki dla pracowników</label><input id="st_pwa" value="' + esc(s.pwaUrl || '') + '" placeholder="https://…github.io/etner-app/"></div>' +
     '<button class="btn" data-act="sturl">Zapisz adresy</button></div>' +
@@ -1505,6 +1915,7 @@ function settingsSave(what) {
   if (what === 'pumble') { var k = $('st_key').value.trim(); if (k) d.pumbleKey = k; d.notify = $('st_notify').checked; }
   if (what === 'unlink') d.pumbleKey = '';
   if (what === 'url') { d.appUrl = $('st_url').value.trim(); d.pwaUrl = $('st_pwa').value.trim(); }
+  if (what === 'push') d.pushAt = $('st_pushat').value;
   busy(true);
   api('apiSettingsSave', d).then(function (s) { S.settings = s; S.pumble = s.pumble; S.users = null; toast(s.info || 'Zapisano.'); renderSettings(); })
     .catch(fail).then(function () { busy(false); });
@@ -1544,7 +1955,7 @@ var ACT = {
   back: back, reload: reload, close: closeSheet, retry: function () { $('view').innerHTML = '<div class="loading"><span class="spin"></span></div>'; sync(); },
   yes: function () { var f = S.askFn; S.askFn = null; closeSheet(); if (f) f(); },
   install: function () { if (installEvt) { installEvt.prompt(); installEvt = null; } },
-  wk: function (el) { var n = +el.getAttribute('data-n'), len = S.harmMode === '2w' && midW() ? 14 : 7; S.week = n === 0 ? monday(S.today) : addD(S.week, n * len); renderHarm(); },
+  wk: function (el) { var n = +el.getAttribute('data-n'), len = S.harmMode === '2w' && midW() ? 14 : 7; S.week = n === 0 ? S.today : addD(S.week, n * len); renderHarm(); },
   hmode: function (el) { S.harmMode = el.getAttribute('data-m'); renderHarm(); },
   onlyme: function (el) { S.onlyMe = el.checked; renderHarm(); },
   hcell: harmCellClick,
@@ -1574,12 +1985,19 @@ var ACT = {
   pnew: function (el) { pumbleNewSheet(el.getAttribute('data-obj')); }, pnewsave: function (el) { pumbleNewSave(el.getAttribute('data-obj')); },
   useredit: function (el) { userSheet(el.getAttribute('data-id')); }, usersave: function (el) { userSave(el.getAttribute('data-id')); },
   copy: function (el) { copy(el.getAttribute('data-v')); },
-  stsave: function () { settingsSave('pumble'); }, stunlink: function () { settingsSave('unlink'); }, sturl: function () { settingsSave('url'); }
+  stsave: function () { settingsSave('pumble'); }, stunlink: function () { settingsSave('unlink'); }, sturl: function () { settingsSave('url'); },
+  stpush: function () { settingsSave('push'); },
+  pushon: function () { pushEnable(); }, pushtest: function () { api('apiPushTest').then(function (r) { toast(r.sent ? 'Wysłano próbne powiadomienie.' : 'Brak zarejestrowanych telefonów.', !r.sent); }).catch(fail); },
+  chkadd: function () { checkAdd(); }, chktog: function (el) { checkToggle(el.getAttribute('data-id'), el.checked); },
+  chkdel: function (el) { checkDelete(el.getAttribute('data-id')); }, jcrew: function (el) { S.jutroCrew = el.getAttribute('data-c'); S.tomorrowAt = 0; renderJutro(); },
+  buyadd: function () { buyAdd(); }, buyset: function (el) { buySet(el.getAttribute('data-id'), { status: el.getAttribute('data-s') }); },
+  buydel: function (el) { buyDelete(el.getAttribute('data-id')); }, buyedit: function (el) { buyEdit(el.getAttribute('data-id')); },
+  buysave: function (el) { buyEditSave(el.getAttribute('data-id')); }, buydone: function () { S.buyShowDone = !S.buyShowDone; renderBuys(); }
 };
 document.addEventListener('click', function (ev) {
   var el = ev.target.closest('[data-act],[data-go]');
   if (!el) { if (ev.target.id === 'sheet') closeSheet(); return; }
-  if (el.tagName === 'INPUT' && el.type === 'checkbox' && el.getAttribute('data-act') !== 'onlyme') return;
+  if (el.tagName === 'INPUT' && el.type === 'checkbox' && ['onlyme', 'chktog'].indexOf(el.getAttribute('data-act')) < 0) return;
   var go_ = el.getAttribute('data-go');
   if (go_) { ev.preventDefault(); go(go_); return; }
   var a = ACT[el.getAttribute('data-act')];
@@ -1588,6 +2006,8 @@ document.addEventListener('click', function (ev) {
 document.addEventListener('keydown', function (ev) {
   if (ev.key === 'Escape') { if (S.viewer) ACT.vclose(); else if (S.sheetOpen) closeSheet(); }
   if (ev.key === 'Enter' && ev.target && ev.target.id === 'p_text') pumbleSend(S.route.split('/')[1]);
+  if (ev.key === 'Enter' && ev.target && ev.target.id === 'chk_text') checkAdd();
+  if (ev.key === 'Enter' && ev.target && ev.target.id === 'buy_co') buyAdd();
   if (S.viewer && ev.key === 'ArrowLeft') ACT.vprev();
   if (S.viewer && ev.key === 'ArrowRight') ACT.vnext();
 });
@@ -1606,10 +2026,18 @@ document.addEventListener('visibilitychange', function () {
   pump();
 });
 setInterval(function () { if (!document.hidden && S.user && !S.outbox.length && (!S.lastSync || Date.now() - S.lastSync > 45000)) sync(); }, 15000);
+setInterval(function () {                                    // o 12:00 lista „Na jutro” przechodzi na kolejny dzień
+  var hr = new Date().getHours() < 12;
+  if (S.jutroHalf !== undefined && S.jutroHalf !== hr && S.route === 'jutro') rerender();
+  S.jutroHalf = hr;
+}, 30000);
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', function (e) {   // klik w powiadomienie
+  if (e.data && e.data.go && S.user) go(e.data.go);
+});
 
 // ------------------------------------------------------------------------------------------------ start
 function initRoute() {
-  S.week = monday(S.today);
+  S.week = S.today;
   S.bp = bp();
   if (MODE === 'gas') {
     try {
@@ -1648,6 +2076,8 @@ function registerSW() {
 }
 function start() {
   registerSW();
+  if (MODE === 'pwa' && TOKEN) idbPut('cfg', { api: CFG.api, token: TOKEN, base: location.pathname + location.search });
+  idbGet('diary_' + KEY).then(function (dz) { if (dz && typeof dz === 'object') Object.keys(dz).forEach(function (k) { if (!S.diary[k]) S.diary[k] = dz[k]; }); });
   if (!TOKEN && MODE === 'pwa') { askLink(); return; }
   if (!TOKEN || BOOT.denied) { noAccess(); return; }
   if (MODE === 'pwa' && !CFG.api) { loadError(new Error('Brak adresu serwera w config.js.')); return; }
@@ -1662,6 +2092,7 @@ function start() {
       if (BOOT.data && !BOOT.stale) { S.lastSync = Date.now(); persistSoon(); } else sync();
     } else sync();
     pump();
+    setTimeout(function () { if (S.user) { prefetch(); pushKeepAlive(); } }, 1500);
   });
 }
 start();

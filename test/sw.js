@@ -1,6 +1,6 @@
 // ETNER – service worker: aplikacja otwiera się od razu (także bez zasięgu) z plików zapisanych w telefonie,
 // a nowa wersja pobiera się w tle i działa od następnego otwarcia. Dane i zapisy idą do Apps Script (nie są tu buforowane).
-var CACHE = 'etner-test-372c80a7bc';
+var CACHE = 'etner-test-fb3830ea15';
 var FILES = ["./", "index.html", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener('install', function (e) {
@@ -27,5 +27,50 @@ self.addEventListener('fetch', function (e) {
   }
   e.respondWith(caches.match(req, { ignoreSearch: true }).then(function (hit) {
     return hit || fetch(req);
+  }));
+});
+
+// ---------------------------------------------------------------- powiadomienia push
+// Serwer wysyła „pusty” push (bez treści); treść pobieramy z apiPushInbox tym samym osobistym kodem co aplikacja.
+function swCfg() {
+  return new Promise(function (res) {
+    try {
+      var rq = indexedDB.open('etner', 1);
+      rq.onupgradeneeded = function () { rq.result.createObjectStore('kv'); };
+      rq.onsuccess = function () {
+        try {
+          var tx = rq.result.transaction('kv', 'readonly'), g = tx.objectStore('kv').get('cfg');
+          g.onsuccess = function () { res(g.result || null); }; g.onerror = function () { res(null); };
+        } catch (e) { res(null); }
+      };
+      rq.onerror = function () { res(null); };
+    } catch (e) { res(null); }
+  });
+}
+self.addEventListener('push', function (e) {
+  e.waitUntil(swCfg().then(function (cfg) {
+    if (!cfg || !cfg.api) return null;
+    return fetch(cfg.api, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                            body: JSON.stringify({ fn: 'apiPushInbox', token: cfg.token, args: [] }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { var n = j && j.ok && j.result && j.result.items && j.result.items[0]; if (n) n.base = cfg.base; return n || { base: cfg.base }; })
+      .catch(function () { return { base: cfg.base }; });
+  }).then(function (n) {
+    n = n || {};
+    return self.registration.showNotification(n.title || 'ETNER', {
+      body: n.body || 'Nowe powiadomienie w aplikacji ETNER.', tag: n.tag || 'etner', renotify: true,
+      icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', data: { url: (n.base || './') + (n.url || '') }
+    });
+  }));
+});
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  var url = (e.notification.data && e.notification.data.url) || './', hash = url.indexOf('#') >= 0 ? url.split('#')[1] : '';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if ('focus' in c) { if (hash) c.postMessage({ go: hash }); return c.focus(); }
+    }
+    return self.clients.openWindow(url);
   }));
 });
