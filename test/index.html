@@ -286,7 +286,7 @@ var TOKEN = String(BOOT.token || urlParam('u') || (MODE === 'pwa' ? (lsGet('toke
 if (MODE === 'pwa' && urlParam('u')) lsSet('token', urlParam('u'));
 var KEY = TOKEN ? TOKEN.slice(-8) : 'x';
 
-var S = { route: 'harm', week: null, harmMode: 'week', onlyMe: false, zlTab: 'akt', ldTab: 'juz', q: { zl: '', ld: '' },
+var S = { route: 'harm', week: null, mon: null, harmMode: '', onlyMe: false, zlTab: 'akt', ldTab: 'juz', q: { zl: '', ld: '' },
           diary: {}, diaryAt: {}, diaryLoading: {}, thumbs: {}, pending: [], pumbleMsgs: {}, users: null, settings: null,
           v: null, outbox: [], hist: {}, checks: [], buys: [], crews: {}, jutroCrew: '', tomorrow: {}, buyShowDone: false };
 var DOW = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
@@ -1017,7 +1017,7 @@ function navReplace(route) {
 function go(route, noPush) {
   if (S.sheetOpen) closeSheet();
   var toHarm = route === 'harm' && S.route.split('/')[0] !== 'harm';
-  if (toHarm) S.week = monday(S.today);                          // harmonogram: bieżący tydzień od poniedziałku…
+  if (toHarm) { S.week = monday(S.today); S.mon = monthStart(S.today); }   // harmonogram: bieżący tydzień (miesiąc)…
   S.route = route;
   if (!noPush) navPush(route);
   render();
@@ -1028,7 +1028,14 @@ function go(route, noPush) {
 function scrollToToday() {
   setTimeout(function () {
     var el = document.querySelector('#view .day.today, #view tr.today');
-    if (!el || pd(S.today).getDay() === 1) return;               // poniedziałek – i tak na górze
+    if (!el) return;
+    var wrap = el.closest ? el.closest('.hgrid-wrap') : null;
+    if (wrap) {                                                  // tabela na komputerze – przewija się sama tabela
+      var th = wrap.querySelector('thead');
+      wrap.scrollTop = Math.max(0, el.offsetTop - (th ? th.offsetHeight : 0) - 60);
+      if (harmRange().month) return;
+    }
+    if (!harmRange().month && pd(S.today).getDay() === 1) return;   // tydzień od poniedziałku – i tak na górze
     var r = el.getBoundingClientRect(), top = $('top') ? $('top').offsetHeight : 0;
     var tabs = $('tabs') && $('tabs').offsetHeight || 0;
     if (r.bottom <= window.innerHeight - tabs && r.top >= top) return;   // już widać w całości
@@ -1119,17 +1126,29 @@ function myCol() {
   var p = S.schedule.persons.filter(function (x) { return norm(x.name) === norm(S.user.person); })[0];
   return p ? p.c : null;
 }
+function monthStart(s) { return s.slice(0, 8) + '01'; }
+function addMonths(s, n) { var d = pd(monthStart(s)); d.setMonth(d.getMonth() + n); return iso(d); }
+function harmModeOf() { return S.harmMode || lsGet('hmode_' + KEY) || (isAdmin() ? 'month' : 'week'); }
+function harmCanMonth() { return isAdmin() || midW(); }
+function harmRange() {
+  if (harmModeOf() === 'month' && harmCanMonth()) {
+    var from = monthStart(S.mon || S.today), to = addD(addMonths(from, 1), -1);
+    return { from: from, len: diffDays(to, from) + 1, to: to, month: true };
+  }
+  return { from: S.week, len: 7, to: addD(S.week, 6), month: false };
+}
 function renderHarm() {
   setTop('Harmonogram', false);
-  var len = S.harmMode === '2w' && midW() ? 14 : 7, from = S.week, to = addD(from, len - 1);
+  var R = harmRange(), len = R.len, from = R.from, to = R.to;
   var d0 = pd(from), d1 = pd(to);
-  var lbl = d0.getDate() + (d0.getMonth() !== d1.getMonth() ? ' ' + MS[d0.getMonth()] : '') + ' – ' + d1.getDate() + ' ' + MS[d1.getMonth()] + ' ' + d1.getFullYear();
+  var lbl = R.month ? MN[d0.getMonth()] + ' ' + d0.getFullYear()
+    : d0.getDate() + (d0.getMonth() !== d1.getMonth() ? ' ' + MS[d0.getMonth()] : '') + ' – ' + d1.getDate() + ' ' + MS[d1.getMonth()] + ' ' + d1.getFullYear();
   var mc = myCol();
   var h = '<div class="htool"><button class="btn sm" data-act="wk" data-n="-1">‹</button><span class="lbl">' + lbl +
     '</span><button class="btn sm" data-act="wk" data-n="1">›</button><button class="btn sm" data-act="wk" data-n="0">Dziś</button>';
-  if (midW()) h += '<div class="seg" style="margin:0;flex:0 0 auto"><button class="' + (S.harmMode === 'week' ? 'on' : '') +
-    '" data-act="hmode" data-m="week">Tydzień</button><button class="' + (S.harmMode === '2w' ? 'on' : '') +
-    '" data-act="hmode" data-m="2w">2 tygodnie</button></div>';
+  if (harmCanMonth()) h += '<div class="seg" style="margin:0;flex:0 0 auto"><button class="' + (!R.month ? 'on' : '') +
+    '" data-act="hmode" data-m="week">Tydzień</button><button class="' + (R.month ? 'on' : '') +
+    '" data-act="hmode" data-m="month">Miesiąc</button></div>';
   if (mc) h += '<label class="row small" style="gap:6px;cursor:pointer"><input type="checkbox" data-act="onlyme"' +
     (S.onlyMe ? ' checked' : '') + '> tylko ja</label>';
   h += '</div>';
@@ -2235,8 +2254,14 @@ var ACT = {
   back: back, reload: reload, close: closeSheet, retry: function () { $('view').innerHTML = '<div class="loading"><span class="spin"></span></div>'; sync(); },
   yes: function () { var f = S.askFn; S.askFn = null; closeSheet(); if (f) f(); },
   install: function () { if (installEvt) { installEvt.prompt(); installEvt = null; } },
-  wk: function (el) { var n = +el.getAttribute('data-n'), len = S.harmMode === '2w' && midW() ? 14 : 7; S.week = n === 0 ? monday(S.today) : addD(S.week, n * len); renderHarm(); if (n === 0) scrollToToday(); },
-  hmode: function (el) { S.harmMode = el.getAttribute('data-m'); renderHarm(); },
+  wk: function (el) {
+    var n = +el.getAttribute('data-n'), month = harmRange().month;
+    if (n === 0) { S.week = monday(S.today); S.mon = monthStart(S.today); }
+    else if (month) S.mon = addMonths(S.mon || S.today, n);
+    else S.week = addD(S.week, n * 7);
+    renderHarm(); if (n === 0) scrollToToday();
+  },
+  hmode: function (el) { S.harmMode = el.getAttribute('data-m'); lsSet('hmode_' + KEY, S.harmMode); S.week = monday(S.today); S.mon = monthStart(S.today); renderHarm(); scrollToToday(); },
   onlyme: function (el) { S.onlyMe = el.checked; renderHarm(); },
   hcell: harmCellClick,
   scode: function (el) { $('s_text').value = el.getAttribute('data-v'); var s = $('s_job'); if (s) s.value = ''; },
@@ -2318,7 +2343,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('mess
 
 // ------------------------------------------------------------------------------------------------ start
 function initRoute() {
-  S.week = monday(S.today);
+  S.week = monday(S.today); S.mon = monthStart(S.today);
   S.bp = bp();
   if (MODE === 'gas') {
     try {
