@@ -1,6 +1,6 @@
 // ETNER – service worker: aplikacja otwiera się od razu (także bez zasięgu) z plików zapisanych w telefonie,
 // a nowa wersja pobiera się w tle i działa od następnego otwarcia. Dane i zapisy idą do Apps Script (nie są tu buforowane).
-var CACHE = 'etner-test-6625e1a59a';
+var CACHE = 'etner-test-c2e9d4cc28';
 var FILES = ["./", "index.html", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener('install', function (e) {
@@ -9,12 +9,20 @@ self.addEventListener('install', function (e) {
 
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k.indexOf('etner-') === 0 && k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.filter(function (k) { return k.indexOf('etner-') === 0 && k !== CACHE && k !== 'etner-lib'; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
 });
 
 self.addEventListener('fetch', function (e) {
   var req = e.request, url = new URL(req.url);
+  if (req.method === 'GET' && url.host === 'www.gstatic.com' && url.pathname.indexOf('/firebasejs/') === 0) {   // biblioteka Firebase (wersja w adresie)
+    e.respondWith(caches.open('etner-lib').then(function (c) {
+      return c.match(req).then(function (hit) {
+        return hit || fetch(req).then(function (r) { if (r && r.ok) c.put(req, r.clone()); return r; });
+      });
+    }));
+    return;
+  }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   if (req.mode === 'navigate') {                         // strona: od razu z pamięci, w tle sprawdzam nowszą
     e.respondWith(caches.open(CACHE).then(function (c) {

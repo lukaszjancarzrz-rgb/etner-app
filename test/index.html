@@ -437,15 +437,17 @@ function applyData(d) {
   S.schedule = d.schedule; S.areas = d.areas || { Z: [], L: [] }; S.today = d.today || S.today || todayLocal();
   S.pumble = d.pumble; S.test = !!d.test; S.serverVersion = d.version;
   S.checks = d.checks || []; S.buys = d.buys || []; S.crews = d.crews || {}; S.pumbleWs = d.pumbleWs || ''; S.pumbleTpl = d.pumbleTpl || '';
-  S.pwaUrl = d.pwaUrl || ''; S.vapid = d.vapid || '';
+  S.pwaUrl = d.pwaUrl || ''; S.vapid = d.vapid || ''; S.fb = d.fb || null;
   if (!S.areas.K) S.areas.K = [];
   S._jm = null;
   S.outbox.forEach(function (op) { applyOp(op); });
+  if (FS.on) fsApplyAll();
+  setTimeout(function () { fsStart(S.fb); }, 0);
 }
 function snapshotOf() {
   return { v: S.v, user: S.user, lists: S.lists, jobs: S.jobs, leads: S.leads, hist: S.hist, schedule: S.schedule, areas: S.areas,
            today: S.today, pumble: S.pumble, test: S.test, version: S.serverVersion, checks: S.checks, buys: S.buys, crews: S.crews,
-           pumbleWs: S.pumbleWs, pumbleTpl: S.pumbleTpl, pwaUrl: S.pwaUrl, vapid: S.vapid };
+           pumbleWs: S.pumbleWs, pumbleTpl: S.pumbleTpl, pwaUrl: S.pwaUrl, vapid: S.vapid, fb: S.fb };
 }
 function saveData(d) {
   clearTimeout(persistSoon.tm);
@@ -499,15 +501,20 @@ function adopt(res) {
 var Q = { running: false, fail: 0 };
 var OP_LABEL = { sched: 'Harmonogram', job: 'Zlecenie', lead: 'Lead', contact: 'Kontakt', tojob: 'Zlecenie z leada', diary: 'Wpis',
                  ddel: 'Usuwanie wpisu', psend: 'Wiadomość Pumble', chk_add: 'Lista do zabrania', chk_tog: 'Lista do zabrania',
-                 chk_del: 'Lista do zabrania', buy_add: 'Zakupy', buy_set: 'Zakupy', buy_del: 'Zakupy' };
+                 chk_del: 'Lista do zabrania', buy_add: 'Zakupy', buy_set: 'Zakupy', buy_del: 'Zakupy', ntf: 'Powiadomienie' };
 /** Po zapisie nowej pozycji: tymczasowy numer w kolejnych zapisach z kolejki zamieniony na prawdziwy. */
 function remapOutbox(tmp, real) {
   if (!tmp || tmp === real) return;
   S.outbox.forEach(function (op) { if (op.p && op.p.id === tmp) op.p.id = real; });
   saveOutbox();
 }
+function remapLocal(tmp, real) {
+  [S.checks, S.buys].forEach(function (l) { (l || []).forEach(function (x) { if (x.id === tmp) x.id = real; }); });
+  remapOutbox(tmp, real);
+}
 function saveOutbox() { return idbPut('outbox_' + KEY, S.outbox.map(function (o) { var c = {}; for (var k in o) if (k !== 'st') c[k] = o[k]; return c; })); }
 function enqueue(type, p) {
+  if (FS.on && FS_TYPES[type]) { p.fs = true; if (p.tmpId) p.tmpId = fsId(type === 'chk_add' ? 'K' : 'P'); }
   var op = { id: uid(), type: type, p: p, t: Date.now() };
   S.outbox.push(op);
   saveOutbox();
@@ -523,6 +530,7 @@ function pump() {
   Q.running = true; op.st = 'send'; badge();
   sendOp(op).then(function () {
     S.outbox.shift(); Q.running = false; Q.fail = 0;
+    if (FS.on && FS_TYPES[op.type]) fsApplyAll();
     saveOutbox(); badge(); rerender(); pump();
   }, function (e) {
     Q.running = false;
@@ -562,7 +570,10 @@ function applyOp(op) {
   }
   else if (op.type === 'buy_set') {
     var bq = byId(S.buys, p.id);
-    if (bq) { Object.keys(p.patch).forEach(function (k) { bq[k] = p.patch[k]; }); place(bq, S.areas.K); }
+    if (bq) {
+      Object.keys(p.patch).forEach(function (k) { bq[k] = p.patch[k]; });
+      if (FS.on) { bq.arch = norm(bq.status) === 'kupione'; bq.zamk = bq.arch ? (bq.zamk || S.today) : ''; } else place(bq, S.areas.K);
+    }
   }
   else if (op.type === 'buy_del') S.buys = S.buys.filter(function (x) { return x.id !== p.id; });
   else if (op.type === 'tojob') {
@@ -573,6 +584,13 @@ function applyOp(op) {
 }
 function sendOp(op) {
   var p = op.p;
+  if (op.type === 'ntf') return api('apiNotify', p.kind, p.id).catch(function (e) { if (e.net) throw e; });
+  if (FS.on && FS_TYPES[op.type] && !p.fs) {                 // zapis z kolejki sprzed włączenia bazy
+    p.fs = true;
+    if (p.tmpId && /^tmp/.test(p.tmpId)) { var nid = fsId(op.type === 'chk_add' ? 'K' : 'P'); remapLocal(p.tmpId, nid); p.tmpId = nid; }
+    saveOutbox();
+  }
+  if (p.fs && FS.on && FS_TYPES[op.type] && op.type !== 'diary') return fsOp(op);
   if (op.type === 'sched') return opCall(op, 'apiScheduleSet', [p]).then(function (r) {
     if (r && r.days) { var m = dayMap(); r.days.forEach(function (d) { var x = m[d.d]; if (x) { x.cells = d.cells; x.uw = d.uw; } }); }
     calcJobDays(S.jobs); S._jm = null; adopt(r);
@@ -630,7 +648,7 @@ function sendDiary(op) {
       if (!full) throw new Error('Zdjęcie zginęło z pamięci telefonu – dodaj je jeszcze raz.');
       return opCall(op, 'apiPhotoUpload', [p.obj, ph.name, full.split(',')[1], ph.thumb.split(',')[1]], '_p' + i);
     }).then(function (r) {
-      ph.done = { f: r.f, t: r.t, n: r.n };
+      ph.done = { f: r.f, t: r.t, n: r.n, sf: r.sf || '', st: r.st || '' };
       if (r.t) S.thumbs[r.t] = ph.thumb;
       doneN++; prog(); saveOutbox();
       return worker();
@@ -638,6 +656,10 @@ function sendDiary(op) {
   }
   if (idx.length) prog();
   var next = function () { return Promise.all([worker(), worker()]); };
+  if (p.fs && FS.on) return next().then(function () {
+    op.prog = 'zapisywanie…'; rerenderDetail();
+    return fsDiary(op, p.photos.map(function (x) { return x.done; }));
+  });
   return next().then(function () {
     op.prog = 'zapisywanie…'; rerenderDetail();
     return opCall(op, 'apiDiaryAdd', [p.obj, p.text, p.photos.map(function (x) { return x.done; })]);
@@ -659,6 +681,208 @@ function opFailed(op) {
       else idbGet('ph_' + x.key).then(function (full) { if (full) S.pending.push({ obj: p.obj, name: x.name, full: full, thumb: x.thumb }); rerenderDetail(); });
     });
   }
+}
+// ------------------------------------------------------------------------------------------------ baza na żywo (Firestore)
+// Listy „do zabrania”, zakupy i dziennik: telefon zapisuje prosto do Firestore, zmiany innych przychodzą same (~1 s).
+// Apps Script: token logowania, powiadomienia, zdjęcia na Dysku i kopia do arkusza. Bez konfiguracji – po staremu.
+var FBV = '11.0.2';
+var FS = { on: false, api: null, ready: false, since: {}, unsub: [], data: { checks: {}, buys: {}, diary: {}, diaryL: {} }, tm: {} };
+var FS_TYPES = { chk_add: 1, chk_tog: 1, chk_del: 1, buy_add: 1, buy_set: 1, buy_del: 1, diary: 1, ddel: 1 };
+function fsColls() { return isAdmin() ? ['checks', 'buys', 'diary', 'diaryL'] : ['checks', 'buys', 'diary']; }
+function fsId(prefix) {
+  var d = new Date(), p2 = function (n) { return ('0' + n).slice(-2); };
+  return prefix + String(d.getUTCFullYear()).slice(-2) + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + p2(d.getUTCHours()) + p2(d.getUTCMinutes()) +
+    p2(d.getUTCSeconds()) + Math.random().toString(36).slice(2, 7);
+}
+function fsVals(c) { var o = FS.data[c] || {}; return Object.keys(o).map(function (k) { return o[k]; }); }
+function fsLoadLocal() {
+  return Promise.all(['checks', 'buys', 'diary', 'diaryL'].map(function (c) {
+    return idbGet('fs_' + c + '_' + KEY).then(function (v) { if (v && v.docs) { FS.data[c] = v.docs; FS.since[c] = v.since || 0; } });
+  }));
+}
+function fsSaveLocal(c) {
+  clearTimeout(FS.tm[c]);
+  FS.tm[c] = setTimeout(function () { idbPut('fs_' + c + '_' + KEY, { docs: FS.data[c], since: FS.since[c] || 0 }); }, 500);
+}
+/** Dane z Firestore → struktury aplikacji (listy, zakupy, dzienniki z licznikami); niewysłane zmiany z kolejki na wierzchu. */
+function fsApplyAll() {
+  if (!S.user) return;
+  var from = addD(S.today || todayLocal(), -14), old = addD(S.today || todayLocal(), -60), kup = kupioneStatus(), first = (S.lists.statusK || [])[0] || 'Do kupienia';
+  S.checks = fsVals('checks').filter(function (d) { return !d.del && d.day >= from; }).map(function (d) {
+    return { id: d.id, crew: d.crew, day: d.day, text: d.text, by: d.by, byId: d.byId, at: d.at || '', done: !!d.done, doneBy: d.doneBy || '', doneAt: d.doneAt || '' };
+  });
+  S.buys = fsVals('buys').filter(function (d) { return !d.del && !(d.bought && d.boughtAt && d.boughtAt < old); }).map(function (d) {
+    return { id: d.id, co: d.co, sklep: d.sklep || '', grupa: d.grupa || '', status: d.bought ? kup : (d.status && norm(d.status) !== 'kupione' ? d.status : first),
+             kwota: d.kwota === null || d.kwota === undefined ? '' : d.kwota, lista: d.lista || '', uwagi: d.uwagi || '', by: d.by || '', byId: d.byId || '',
+             sec: '', arch: !!d.bought, zamk: d.boughtAt || '' };
+  });
+  var byObj = {};
+  fsVals('diary').concat(fsVals('diaryL')).forEach(function (d) {
+    if (d.del) return;
+    (byObj[d.obj] = byObj[d.obj] || []).push({ id: d.id, obj: d.obj, when: d.when, author: d.author, text: d.text || '', mine: d.authorId === S.user.id, photos: d.photos || [] });
+  });
+  var desc = function (a, b) { return a.id < b.id ? 1 : (a.id > b.id ? -1 : 0); }, now = Date.now();
+  S.diary = {};
+  (S.jobs || []).forEach(function (j) {
+    S.diary[j.id] = (byObj[j.id] || []).concat(j.leadId ? byObj[j.leadId] || [] : []).sort(desc);
+    S.diaryAt[j.id] = now; j.n = (byObj[j.id] || []).length;
+  });
+  (S.leads || []).forEach(function (l) { S.diary[l.id] = (byObj[l.id] || []).slice().sort(desc); S.diaryAt[l.id] = now; l.n = S.diary[l.id].length; });
+  S.outbox.forEach(function (op) { if (FS_TYPES[op.type]) applyOp(op); });
+}
+function fsMerge(c, docs) {
+  var m = FS.data[c] = FS.data[c] || {}, since = FS.since[c] || 0;
+  docs.forEach(function (d) {
+    var cur = m[d.id];
+    if (!cur || (d.upd || 0) >= (cur.upd || 0)) m[d.id] = d;
+    if (d.upd > since) since = d.upd;
+  });
+  FS.since[c] = since;
+  fsSaveLocal(c);
+  fsApplyAll();
+  clearTimeout(FS.rr); FS.rr = setTimeout(function () { rerender(); renderNav(); }, 60);
+}
+/** Zmiana zapisana w bazie – od razu w danych (bez czekania na nasłuch; serwerowa wersja i tak ją zastąpi). */
+function fsLocal(c, id, patch, create) {
+  var m = FS.data[c] = FS.data[c] || {}, cur = m[id];
+  if (!cur && !create) return;
+  var d = {}; for (var k in (cur || {})) d[k] = cur[k];
+  for (var k2 in patch) d[k2] = patch[k2];
+  d.id = id; if (!cur) d.upd = 0;
+  m[id] = d;
+  fsSaveLocal(c);
+}
+function fsAdapter() {
+  if (window.ETNER_FS_MOCK) return Promise.resolve(window.ETNER_FS_MOCK());
+  var b = 'https://www.gstatic.com/firebasejs/' + FBV + '/';
+  return Promise.all([import(b + 'firebase-app.js'), import(b + 'firebase-auth.js'), import(b + 'firebase-firestore.js')])
+    .then(function (m) { return fsReal(m[0], m[1], m[2]); });
+}
+function fsReal(A, Au, F) {
+  var auth = null, db = null;
+  var withUpd = function (data) { var d = {}; for (var k in data) d[k] = data[k]; d.upd = F.serverTimestamp(); return d; };
+  return {
+    init: function (cfg) {
+      var app = A.getApps().length ? A.getApp() : A.initializeApp(cfg);
+      auth = Au.getAuth(app);
+      try { db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() }); } catch (e) { db = F.getFirestore(app); }
+      return auth.authStateReady ? auth.authStateReady() : Promise.resolve();
+    },
+    user: function () { return auth.currentUser ? auth.currentUser.uid : ''; },
+    signIn: function (tok) { return Au.signInWithCustomToken(auth, tok).then(function (c) { return c.user.uid; }); },
+    signOut: function () { return Au.signOut(auth); },
+    listen: function (coll, sinceMs, onDocs, onErr) {
+      var q = F.query(F.collection(db, coll), F.where('upd', '>', F.Timestamp.fromMillis(sinceMs || 0)));
+      return F.onSnapshot(q, function (snap) {
+        var out = [];
+        snap.docChanges().forEach(function (ch) {
+          if (ch.type === 'removed') return;
+          var d = ch.doc.data();
+          if (!d.upd) return;                                   // zapis jeszcze nie potwierdzony – przyjdzie za chwilę
+          d.id = ch.doc.id; d.upd = d.upd.toMillis(); out.push(d);
+        });
+        if (out.length) onDocs(out);
+      }, onErr);
+    },
+    set: function (coll, id, data) { return F.setDoc(F.doc(db, coll, id), withUpd(data)); },
+    update: function (coll, id, data) { return F.updateDoc(F.doc(db, coll, id), withUpd(data)); }
+  };
+}
+function fsClaimsKey() { return S.user ? S.user.id + '|' + S.user.role + '|' + (S.user.ekipa || '') : ''; }
+/** Logowanie do bazy i nasłuch zmian. fb = {cfg, token, ver} z serwera (albo null – baza wyłączona). */
+function fsStart(fb) {
+  if (!S.user) return;
+  if (!fb || !fb.cfg) { if (FS.on || lsGet('fs_on_' + KEY)) fsStop(); return; }
+  if (FS.starting || (FS.ready && FS.ver === fb.ver && FS.ck === fsClaimsKey())) return;
+  FS.starting = true;
+  FS.on = true; lsSet('fs_on_' + KEY, 1);
+  var p = FS.api ? Promise.resolve(FS.api) : fsAdapter().then(function (a) { FS.api = a; return a.init(fb.cfg).then(function () { return a; }); });
+  p.then(function (a) {
+    if (a.user() === S.user.id && lsGet('fs_ck_' + KEY) === fsClaimsKey()) return;
+    var tok = fb.token ? Promise.resolve(fb.token) : api('apiFbToken').then(function (x) { return x && x.token; });
+    return tok.then(function (t) {
+      if (!t) throw new Error('Brak tokenu logowania do bazy.');
+      return a.signIn(t).catch(function () { return api('apiFbToken').then(function (x) { return a.signIn(x.token); }); });
+    }).then(function () { lsSet('fs_ck_' + KEY, fsClaimsKey()); });
+  }).then(function () {
+    FS.ready = true; FS.ver = fb.ver; FS.ck = fsClaimsKey(); FS.err = '';
+    fsListen();
+    pump();
+  }).catch(function (e) {
+    FS.err = (e && e.message) || String(e);
+    if (window.console) console.warn('Firestore:', e);
+    FS.on = false; FS.ready = false;                          // do czasu połączenia – zapisy przez Apps Script (też trafiają do bazy)
+    if (!FS.warned) { FS.warned = true; toast('Baza na żywo chwilowo niedostępna – zapisuję przez serwer.', true); }
+    clearTimeout(FS.retry); FS.retry = setTimeout(function () { if (!FS.ready && S.fb) fsStart(S.fb); }, 60000);
+    pump();
+  }).then(function () { FS.starting = false; });
+}
+function fsListen() {
+  FS.unsub.forEach(function (u) { try { u(); } catch (e) {} });
+  FS.unsub = fsColls().map(function (c) {
+    return FS.api.listen(c, FS.since[c] || 0, function (docs) { fsMerge(c, docs); }, function (e) {
+      FS.err = (e && e.message) || String(e);
+      if (e && /permission/i.test(e.code || e.message)) { FS.ready = false; lsSet('fs_ck_' + KEY, ''); sync(true); }
+    });
+  });
+}
+function fsStop() {
+  FS.unsub.forEach(function (u) { try { u(); } catch (e) {} });
+  FS.unsub = []; FS.on = false; FS.ready = false;
+  lsSet('fs_on_' + KEY, 0);
+}
+function fsErr(e) {
+  var c = (e && e.code) || '';
+  if (/permission/.test(c)) return new Error('Brak uprawnień do tej zmiany.');
+  if (/not-found/.test(c)) return new Error('Tej pozycji już nie ma.');
+  if (/unavailable|deadline|network/.test(c)) { var n = new Error('Brak połączenia – spróbuję ponownie.'); n.net = true; return n; }
+  return e instanceof Error ? e : new Error(String(e));
+}
+function fsBuyPatch(patch) {
+  var u = {};
+  ['co', 'sklep', 'grupa', 'uwagi'].forEach(function (k) { if (patch[k] !== undefined) u[k] = String(patch[k] || ''); });
+  if (patch.kwota !== undefined) { var n = String(patch.kwota).replace(/\s/g, '').replace(',', '.'); u.kwota = n === '' ? null : (isFinite(+n) ? +n : String(patch.kwota)); }
+  if (patch.status !== undefined) {
+    var b = norm(patch.status) === 'kupione';
+    u.status = patch.status; u.bought = b; u.boughtAt = b ? (S.today || todayLocal()) : ''; u.boughtBy = b ? S.user.name : '';
+  }
+  return u;
+}
+/** Zapis z kolejki do Firestore. */
+function fsOp(op) {
+  var p = op.p, A = FS.api, me = S.user, d;
+  if (!FS.ready || !A) { var w = new Error('Łączę z bazą…'); w.net = true; return Promise.reject(w); }
+  var go = function (pr) { return pr.catch(function (e) { throw fsErr(e); }); };
+  if (op.type === 'chk_add') {
+    d = { crew: p.crew, day: p.day, text: p.text, by: me.name, byId: me.id, at: p.at || stampNow(), done: false, doneBy: '', doneAt: '', del: false };
+    return go(A.set('checks', p.tmpId, d)).then(function () { fsLocal('checks', p.tmpId, d, true); enqueue('ntf', { kind: 'chk', id: p.tmpId }); });
+  }
+  if (op.type === 'chk_tog') { d = { done: !!p.done, doneBy: p.done ? me.name : '', doneAt: p.done ? stampNow() : '' }; return go(A.update('checks', p.id, d)).then(function () { fsLocal('checks', p.id, d); }); }
+  if (op.type === 'chk_del') return go(A.update('checks', p.id, { del: true })).then(function () { fsLocal('checks', p.id, { del: true }); });
+  if (op.type === 'buy_add') {
+    d = { co: p.co, uwagi: p.uwagi || '', sklep: '', grupa: '', kwota: null, status: (S.lists.statusK || [])[0] || 'Do kupienia', lista: 'aplikacja: ' + me.name,
+          by: me.name, byId: me.id, at: p.at || stampNow(), bought: false, boughtAt: '', boughtBy: '', del: false };
+    return go(A.set('buys', p.tmpId, d)).then(function () { fsLocal('buys', p.tmpId, d, true); enqueue('ntf', { kind: 'buy', id: p.tmpId }); });
+  }
+  if (op.type === 'buy_set') {
+    d = fsBuyPatch(p.patch);
+    return go(A.update('buys', p.id, d)).then(function () { fsLocal('buys', p.id, d); if (d.bought) enqueue('ntf', { kind: 'buyDone', id: p.id }); });
+  }
+  if (op.type === 'buy_del') return go(A.update('buys', p.id, { del: true })).then(function () { fsLocal('buys', p.id, { del: true }); });
+  if (op.type === 'ddel') { var cl = /^L/.test(p.obj) ? 'diaryL' : 'diary'; return go(A.update(cl, p.id, { del: true })).then(function () { fsLocal(cl, p.id, { del: true }); }); }
+  return Promise.resolve();
+}
+/** Wpis dziennika: zdjęcia na Dysk (Apps Script), wpis do Firestore. */
+function fsDiary(op, photos) {
+  var p = op.p, me = S.user, lead = /^L/.test(p.obj), cl = lead ? 'diaryL' : 'diary';
+  if (!FS.ready) { var w = new Error('Łączę z bazą…'); w.net = true; return Promise.reject(w); }
+  if (!p.fid) { p.fid = fsId('D'); saveOutbox(); }
+  var d = { obj: p.obj, lead: lead, when: p.when || stampNow(), author: me.name, authorId: me.id, text: p.text || '', photos: photos, del: false };
+  return FS.api.set(cl, p.fid, d).catch(function (e) { throw fsErr(e); }).then(function () {
+    fsLocal(cl, p.fid, d, true); fsApplyAll();
+    p.photos.forEach(function (x) { idbDel('ph_' + x.key); });
+    enqueue('ntf', { kind: 'diary', id: p.fid });
+  });
 }
 function putRecord(kind, oldId, rec, route) {
   var list = S[kind]; if (!list) return;
@@ -1093,6 +1317,7 @@ function loadJob(id) {
   if (!j._tmp) needDiary(id);
 }
 function needDiary(id) {
+  if (FS.on) return;                                       // dziennik przychodzi na żywo z bazy
   if (S.diaryLoading[id] || (S.diary[id] && Date.now() - (S.diaryAt[id] || 0) < 30000)) return;
   S.diaryLoading[id] = true;
   api('apiDetail', id).then(function (r) {
@@ -1650,7 +1875,7 @@ function renderJutro() {
   // zlecenia: adres, telefon, dziennik, Pumble
   var T = S.tomorrow || {};
   jj.jobs.forEach(function (j) {
-    var dz = (T.diary && T.diary[j.id]) || S.diary[j.id] || [], pm = T.pumble && T.pumble[j.id];
+    var dz = (FS.on ? S.diary[j.id] : (T.diary && T.diary[j.id]) || S.diary[j.id]) || [], pm = T.pumble && T.pumble[j.id];
     h += '<div class="card jcard"><div class="row"><span class="kat ' + katCls(j.kat) + '">' + esc(j.kat || '–') + '</span><b class="grow ell">' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.id) + '</b>' +
       '<button class="btn sm" data-go="zl/' + esc(j.id) + '">Otwórz</button></div>' + (j.zakres ? '<div class="small" style="margin-top:6px">' + esc(j.zakres) + '</div>' : '') +
       contactHtml(j) +
@@ -1824,6 +2049,7 @@ function pushKeepAlive() {
 
 // ------------------------------------------------------------------------------------------------ dzienniki z wyprzedzeniem
 function prefetch() {
+  if (FS.on) return;
   if (S.prefetching || (S.prefetchAt && Date.now() - S.prefetchAt < 120000 && S.prefetchV === S.v)) return;
   S.prefetching = true;
   api('apiPrefetch').then(function (r) {
@@ -1932,11 +2158,36 @@ function renderSettings() {
     '<div class="card"><h3>🔗 Adresy aplikacji</h3><div class="fld"><label>Adres wdrożenia Apps Script (kończy się na /exec)</label><input id="st_url" value="' + esc(s.appUrl) + '"></div>' +
     '<div class="fld"><label>Adres aplikacji na telefon (instalowanej) – z niego powstają linki dla pracowników</label><input id="st_pwa" value="' + esc(s.pwaUrl || '') + '" placeholder="https://…github.io/etner-app/"></div>' +
     '<button class="btn" data-act="sturl">Zapisz adresy</button></div>' +
+    fbCard(s) +
     '<div class="card"><h3>📁 Dane</h3><div class="list">' +
     (s.sheet ? '<a class="item" target="_blank" rel="noopener" href="' + esc(s.sheet) + '"><b>Arkusz Firma_2026</b><div class="small muted">finanse, płace, KPiR, pełne tabele</div></a>' : '') +
     (s.photos ? '<a class="item" target="_blank" rel="noopener" href="' + esc(s.photos) + '"><b>Zdjęcia (Dysk Google)</b><div class="small muted">folder na każde zlecenie i lead</div></a>' : '') +
     (s.db ? '<a class="item" target="_blank" rel="noopener" href="' + esc(s.db) + '"><b>Baza aplikacji</b><div class="small muted">użytkownicy, dziennik, powiązania, log zmian</div></a>' : '') +
     '</div><p class="tiny muted">Aplikacja ' + esc(s.version) + ' · skrypt arkusza ' + esc(s.sheetVersion) + '</p></div>';
+}
+function fbCard(s) {
+  var f = s.fb || {};
+  return '<div class="card"><h3>⚡ Baza na żywo (Firebase)</h3><p class="small">' +
+    (f.on ? '<span class="ok">● włączona</span> – projekt <b>' + esc(f.project) + '</b>. Listy „do zabrania”, zakupy i dziennik zmieniają się u wszystkich od razu.' +
+      (f.backupAt ? '<br><span class="tiny muted">Ostatnia kopia do arkusza: ' + esc(f.backupAt) + ' (co 5 min)</span>' : '')
+      : '○ wyłączona – wszystko idzie przez arkusz (wolniej, odświeżanie co 45 s).') + '</p>' +
+    '<details' + (f.on ? '' : ' open') + '><summary class="small">' + (f.on ? 'Zmień konfigurację' : 'Połącz z Firebase') + '</summary>' +
+    '<div class="fld" style="margin-top:8px"><label>1. Konfiguracja aplikacji: Firebase → Ustawienia projektu → Twoje aplikacje → blok <code>firebaseConfig</code> (cały)</label>' +
+    '<textarea id="fb_cfg" rows="5" placeholder="const firebaseConfig = { apiKey: …, projectId: …, appId: … };"></textarea></div>' +
+    '<div class="fld"><label>2. Klucz konta usługi: Ustawienia projektu → Konta usługi → <b>Wygeneruj nowy klucz prywatny</b> → otwórz pobrany plik JSON i wklej całą zawartość. To jest hasło do bazy – nie wysyłaj go nikomu.</label>' +
+    '<textarea id="fb_sa" rows="4" placeholder="' + (f.hasKey ? 'klucz zapisany – wklej nowy tylko, żeby zmienić' : '{ &quot;type&quot;: &quot;service_account&quot;, … }') + '"></textarea></div>' +
+    '<div class="btns"><button class="btn pri" data-act="fbsave">Połącz i przenieś dane</button>' + (f.on ? '<button class="btn danger" data-act="fboff">Wyłącz bazę</button>' : '') + '</div></details></div>';
+}
+function fbSave(off) {
+  var c = off ? '' : ($('fb_cfg') || {}).value || '', k = off ? '' : ($('fb_sa') || {}).value || '';
+  if (!off && !c.trim() && !(S.settings.fb && S.settings.fb.hasKey)) return toast('Wklej konfigurację i klucz.', true);
+  busy(true);
+  toast(off ? 'Wyłączam…' : 'Łączę z Firebase i przenoszę dane – to może potrwać do minuty…');
+  api('apiFbSetup', c, k, !!off).then(function (s) {
+    S.settings = s; toast(s.info || 'Zapisano.'); renderSettings();
+    if (off) fsStop();
+    sync(true);
+  }).catch(fail).then(function () { busy(false); });
 }
 function settingsSave(what) {
   var d = {};
@@ -1972,7 +2223,8 @@ function copy(v) {
   toast(ok ? 'Skopiowano link.' : 'Zaznacz link i skopiuj ręcznie.', !ok);
 }
 function reload() {
-  S.diary = {}; S.diaryAt = {}; S.pumbleMsgs = {};
+  if (!FS.on) { S.diary = {}; S.diaryAt = {}; }
+  S.pumbleMsgs = {};
   toast('Wczytuję dane z arkusza…');
   sync(true);
   pump();
@@ -2015,6 +2267,7 @@ var ACT = {
   copy: function (el) { copy(el.getAttribute('data-v')); },
   stsave: function () { settingsSave('pumble'); }, stunlink: function () { settingsSave('unlink'); }, sturl: function () { settingsSave('url'); },
   stpush: function () { settingsSave('push'); },
+  fbsave: function () { fbSave(false); }, fboff: function () { ask('Wyłączyć bazę na żywo? Aplikacja wróci do pracy przez arkusz.', function () { fbSave(true); }, 'danger'); },
   pushon: function () { pushEnable(); }, pushtest: function () { api('apiPushTest').then(function (r) { toast(r.sent ? 'Wysłano próbne powiadomienie.' : 'Brak zarejestrowanych telefonów.', !r.sent); }).catch(fail); },
   chkadd: function () { checkAdd(); }, chktog: function (el) { checkToggle(el.getAttribute('data-id'), el.checked); },
   chkdel: function (el) { checkDelete(el.getAttribute('data-id')); }, jcrew: function (el) { S.jutroCrew = el.getAttribute('data-c'); S.tomorrowAt = 0; renderJutro(); },
@@ -2111,7 +2364,9 @@ function start() {
   if (!TOKEN && MODE === 'pwa') { askLink(); return; }
   if (!TOKEN || BOOT.denied) { noAccess(); return; }
   if (MODE === 'pwa' && !CFG.api) { loadError(new Error('Brak adresu serwera w config.js.')); return; }
-  var ob = idbGet('outbox_' + KEY), timeout = new Promise(function (res) { setTimeout(res, 1500); });
+  if (lsGet('fs_on_' + KEY)) FS.on = true;
+  var ob = Promise.all([idbGet('outbox_' + KEY), FS.on ? fsLoadLocal() : null]).then(function (r) { return r[0]; });
+  var timeout = new Promise(function (res) { setTimeout(res, 1500); });
   Promise.race([ob, timeout]).then(function (list) {
     S.outbox = Array.isArray(list) ? list : [];
     var d = BOOT.data || lsGet('data_' + KEY);
