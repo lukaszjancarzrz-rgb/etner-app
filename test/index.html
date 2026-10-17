@@ -285,6 +285,24 @@ div.drf{color:var(--text)}
 .newsbar .nrow s{color:var(--muted)}
 [data-fid].hl{animation:hlpulse 2.4s ease-out 1}
 [data-fid].fcs{outline:2px solid #16A34A;outline-offset:2px;border-radius:6px}
+.item .newline{margin-top:6px}
+.item .newline .pill.newp{font-size:11px;text-transform:none;letter-spacing:0}
+/* Twoja praca w harmonogramie */
+.mywork{border:2px solid var(--navy);background:#F5F8FF}
+.mywork .mw-h{font-weight:700;color:var(--navy);margin-bottom:4px}
+.mw-row{display:flex;gap:12px;padding:8px 0;border-top:1px dashed var(--line)}
+.mw-h + .mw-row{border-top:0}
+.mw-d{min-width:64px;font-weight:700;color:var(--navy)}
+.mw-j{margin-bottom:6px}
+.mw-j .link.b{font-weight:700;font-size:15px;color:var(--text);text-align:left}
+.mw-j .btn{margin-top:4px}
+.mywork .crews{margin-top:2px}
+.pill.me{background:var(--navy);color:#fff;font-size:11px;padding:1px 7px}
+.ent.mine{background:#EEF3FF;border-left:3px solid var(--navy);padding-left:6px;margin-left:-6px;border-radius:4px}
+.hgrid th.me{background:#E3EAF8}
+.hgrid td.me{background:#F2F6FF}
+.hgrid tr.today td.me{background:#FFEFD9}
+.hgrid td.me.isnew{background:#F0FDF4}
 </style>
 
 </head>
@@ -1101,6 +1119,7 @@ function navHtml(cls) {
     if (n.r === 'ld' && S.leads) cnt = overdueCount();
     if (n.r === 'jutro') cnt = jutroOpen();
     if (n.r === 'zakupy') cnt = (S.buys || []).filter(function (b) { return !b.arch && !isOrdered(b); }).length;
+    if (n.r === 'zl') cnt = jobsNewTotal();
     if (cnt) badgeH = cls === 'side' ? ' <span class="pill st-anulowane">' + cnt + '</span>' : '<span class="dot">' + (cnt > 99 ? '99+' : cnt) + '</span>';
     return '<button class="' + (base === n.r ? 'on' : '') + '" data-go="' + n.r + '"><span class="ic">' + n.ic + (cls === 'side' ? '' : badgeH) + '</span><span class="lb">' +
       n.t + (cls === 'side' ? badgeH : '') + '</span></button>';
@@ -1257,6 +1276,21 @@ function schedNewsBar() {
       (x.o ? '<s>' + esc(x.o) + '</s> → ' : '') + (x.n ? '<b>' + esc(x.n) + '</b>' : '<i>bez wpisu</i>') + '</button>';
   }).join('') + (ds.length > 8 ? '<div class="tiny muted">… i jeszcze ' + (ds.length - 8) + '</div>' : '') + '</div>';
 }
+/** Nowe wpisy w dzienniku zlecenia (od innych, jeszcze niewidziane) – do liczników; nie oznacza ich jako pokazanych. */
+function diaryNewCount(id) {
+  var n = news(), me = S.user.name;
+  return (S.diary[id] || []).filter(function (e) { return !e._tmp && !e.mine && e.author !== me && e.when > n.t0 && !n.seen['d:' + e.id]; }).length;
+}
+/** Zlecenia „moje” (licznik na zakładce): administrator – wszystkie; pracownik – z jego kolumny harmonogramu albo jego ekipy. */
+function myJobIds() {
+  if (S._mj && S._mjS === S.schedule && S._mjJ === S.jobs) return S._mj;
+  var out = {}, mc = myCol();
+  S.jobs.forEach(function (j) { if (isAdmin() || (S.user.ekipa && j.ekipa === S.user.ekipa)) out[j.id] = 1; });
+  if (mc && !isAdmin()) (S.schedule.days || []).forEach(function (d) { var t = d.cells[mc]; if (t) cellJobs(t).forEach(function (j) { out[j.id] = 1; }); });
+  S._mj = out; S._mjS = S.schedule; S._mjJ = S.jobs;
+  return out;
+}
+function jobsNewTotal() { var n = 0; Object.keys(myJobIds()).forEach(function (id) { n += diaryNewCount(id); }); return n; }
 /** Przed pokazaniem ekranu z powiadomienia: właściwa ekipa i dzień listy, rozwinięte „Kupione”. */
 function focusPrep(route, id) {
   var base = route.split('/')[0];
@@ -1399,6 +1433,7 @@ function renderHarm() {
     h += '<div class="card small muted">Harmonogram w arkuszu obejmuje ' + fd(S.schedule.from) + ' – ' + fd(S.schedule.to) + '.</div>';
   if (isAdmin()) h += draftBar();
   h += schedNewsBar();
+  h += myWorkCard();
   if (midW()) h += crewLegend();
   var dm = dayMap(), persons = S.schedule.persons.filter(function (p) { return !S.onlyMe || p.c === mc; });
   var dmap = isAdmin() ? draftMap() : null;
@@ -1408,6 +1443,33 @@ function renderHarm() {
     'powiadomienie dopiero po „Zatwierdź”.</p>';
   $('view').innerHTML = h;
   if (S.hlDay) { var hl = document.querySelector('#view [data-day="' + S.hlDay + '"]'); if (hl) hl.classList.add('hl'); S.hlDay = null; }
+}
+/** Na górze harmonogramu: gdzie jedziesz – dziś i następny dzień z Twoim wpisem (zlecenie, nawigacja do adresu, ekipa). */
+function myWorkCard() {
+  var mc = myCol();
+  if (!mc || !S.schedule || !S.schedule.days) return '';
+  var dm = dayMap(), dmap = isAdmin() ? draftMap() : null, today = S.today, show = [];
+  var tv = dm[today] ? cellOf(dm[today], mc, dmap).t : '';
+  if (tv) show.push(today);
+  for (var i = 1; i <= 10 && show.length < 2; i++) {
+    var ds = addD(today, i), d = dm[ds];
+    if (d && cellOf(d, mc, dmap).t) show.push(ds);
+  }
+  if (!show.length) return '';
+  var rows = show.map(function (ds) {
+    var d = dm[ds], t = cellOf(d, mc, dmap).t, dt = pd(ds), js = isAbsence(t) ? [] : cellJobs(t), cr = cellCrews(t, dayLeads(d, dmap));
+    var lbl = ds === today ? 'Dziś' : (ds === addD(today, 1) ? 'Jutro' : DOWL[dt.getDay()]);
+    return '<div class="mw-row"><div class="mw-d">' + lbl + '<div class="tiny muted">' + DOW[dt.getDay()] + ' ' + fds(ds) + '</div></div><div class="grow">' +
+      (js.length ? js.map(function (j) {
+        var adr = j.adres || j.lok, mt = adr ? mapTarget(adr) : null;
+        return '<div class="mw-j"><button class="link b" data-go="zl/' + esc(j.id) + '">' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.id) + '</button>' +
+          (cellParts(t).length > 1 ? ' <span class="tiny muted">(½)</span>' : '') +
+          (adr && !mt.link ? '<div class="small muted">' + esc(adr) + '</div>' : '') +
+          (mt ? '<div><a class="btn sm" href="' + esc(mt.href) + '" target="_blank" rel="noopener">📍 Nawiguj</a></div>' : '') + '</div>';
+      }).join('') : chipHtml(t, !isAdmin())) +
+      (cr.length ? '<div class="crews">' + cr.map(crewPill).join(' ') + '</div>' : '') + '</div></div>';
+  }).join('');
+  return '<div class="card mywork"><div class="mw-h">🚐 Gdzie jedziesz</div>' + rows + '</div>';
 }
 /** Pasek z niezatwierdzonymi zmianami (administrator). */
 function draftBar() {
@@ -1469,7 +1531,8 @@ function harmGrid(from, len, dm, persons, dmap) {
   var h = '<div class="hgrid-wrap"><table class="hgrid"><thead><tr><th class="d">Dzień</th>' +
     persons.map(function (p) {
       var l = crewLeads().filter(function (x) { return x.c === p.c; })[0];
-      return '<th' + (l ? ' title="Brygadzista: ' + esc(l.crew) + '" style="box-shadow:inset 0 -3px 0 ' + l.fg + '"' : '') + '>' + esc(p.name) + '</th>';
+      return '<th' + (p.c === myCol() ? ' class="me"' : '') + (l ? ' title="Brygadzista: ' + esc(l.crew) + '" style="box-shadow:inset 0 -3px 0 ' + l.fg + '"' : '') + '>' +
+        esc(p.name) + (p.c === myCol() ? ' <span class="pill me">Ty</span>' : '') + '</th>';
     }).join('') +
     (S.onlyMe ? '' : '<th>Uwagi</th>') + '</tr></thead><tbody>';
   for (var i = 0; i < len; i++) {
@@ -1481,7 +1544,7 @@ function harmGrid(from, len, dm, persons, dmap) {
     persons.forEach(function (p) {
       var v = cellOf(d, p.c, dmap), t = v.t, cr = cellCrews(t, lt), nw = p.c === mc0 ? schedNewOf(ds) : null;
       var tip = (cr.length ? cr.map(function (l) { return l.crew; }).join(' + ') : '') + (v.dr ? (cr.length ? ' · ' : '') + 'Do zatwierdzenia. Teraz: ' + (v.o || '(pusto)') : '');
-      h += '<td class="cell' + (v.dr ? ' drf' : '') + (cr.length ? ' crw' : '') + (nw ? ' isnew' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
+      h += '<td class="cell' + (v.dr ? ' drf' : '') + (cr.length ? ' crw' : '') + (nw ? ' isnew' : '') + (p.c === mc0 ? ' me' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
         (cr.length ? ' style="box-shadow:inset 4px 0 0 ' + cr[0].fg + (cr[1] ? ',inset 8px 0 0 ' + cr[1].fg : '') + '"' : '') +
         (tip ? ' title="' + esc(tip) + '"' : '') + '>' +
         (t ? chipHtml(t, !isAdmin()) : (v.dr && v.o ? '<span class="chip c-del">' + esc(v.o) + '</span>' : '')) +
@@ -1525,12 +1588,13 @@ function harmCards(from, len, dm, persons, dmap) {
     if (myNew && !myNew.n) h += '<div class="day-b"><div class="ent isnew">' + NEW_PILL + ' <span class="small">Twój wpis usunięty (było: ' + esc(myNew.o) + ')</span></div></div>';
     if (!order.length && !uwv.t && !uwv.dr) { h += (d.wd === 0 || myNew ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
     h += '<div class="day-b">';
+    order.sort(function (a, b) { return (groups[b].mine ? 1 : 0) - (groups[a].mine ? 1 : 0); });   // Twój wpis na górze
     order.forEach(function (k) {
       var g = groups[k], js = g.dr === 'del' ? [] : cellJobs(g.t), cr = g.dr === 'del' ? [] : cellCrews(g.t, lt);
       var gn = g.mine && myNew && myNew.n && !g.dr;
-      h += '<div class="ent' + (g.dr ? ' drf' : '') + (gn ? ' isnew' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' +
+      h += '<div class="ent' + (g.dr ? ' drf' : '') + (gn ? ' isnew' : '') + (g.mine && !g.dr ? ' mine' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' +
         (g.dr === 'del' ? '<span class="chip c-del">' + esc(g.t) + '</span>' : chipHtml(g.t, !isAdmin())) +
-        '</span><span class="who grow">' + (gn ? NEW_PILL + ' ' : '') + esc(g.who.join(', ')) + (gn && myNew.o ? ' <span class="tiny">(było: ' + esc(myNew.o) + ')</span>' : '') + (g.dr ? ' <span class="pill drfp">' + (g.dr === 'del' ? 'usunięte – do zatw.' : 'do zatwierdzenia') + '</span>' : '') +
+        '</span><span class="who grow">' + (g.mine && !g.dr ? '<span class="pill me">Ty</span> ' : '') + (gn ? NEW_PILL + ' ' : '') + esc(g.who.join(', ')) + (gn && myNew.o ? ' <span class="tiny">(było: ' + esc(myNew.o) + ')</span>' : '') + (g.dr ? ' <span class="pill drfp">' + (g.dr === 'del' ? 'usunięte – do zatw.' : 'do zatwierdzenia') + '</span>' : '') +
         js.map(function (j) { return '<br><span class="tiny">' + esc([j.klient, j.lok].filter(Boolean).join(' – ')) + '</span>'; }).join('') +
         (cr.length ? '<span class="crews">' + cr.map(crewPill).join(' ') + '</span>' : '') + '</span></div>';
     });
@@ -1614,10 +1678,12 @@ function jobsFiltered() {
   });
 }
 function jobCard(j, sel) {
+  var nn = j._tmp ? 0 : diaryNewCount(j.id);
   var dates = j.od ? (j.od === j.do || !j.do ? fds(j.od) : fds(j.od) + '–' + fds(j.do)) : '';
   return '<div class="item' + (sel ? ' sel' : '') + (j._tmp ? ' tmp' : '') + '" data-go="zl/' + esc(j.id) + '"><div class="row"><span class="kat ' + katCls(j.kat) + '">' + esc(j.kat || '–') +
     '</span><span class="grow b ell">' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.zakres || j.id) + '</span>' +
     (j.status ? '<span class="pill ' + stCls(j.status) + '">' + esc(j.status) + '</span>' : '') + '</div>' +
+    (nn ? '<div class="newline"><span class="pill newp">' + nn + ' ' + plural(nn, 'nowy wpis', 'nowe wpisy', 'nowych wpisów') + '</span></div>' : '') +
     (j.zakres ? '<div class="small clamp2" style="margin-top:4px">' + esc(j.zakres) + '</div>' : '') +
     '<div class="meta">' + (dates ? '<span>📅 ' + dates + (j.dni ? ' · ' + fmtDni(j.dni) + ' dni w harm.' : '') + '</span>' : (j.termin ? '<span>🗓 ' + esc(j.termin) + '</span>' : '')) +
     (j.ekipa ? '<span>👷 ' + esc(j.ekipa) + '</span>' : '') + (j.n ? '<span>📝 ' + j.n + '</span>' : '') +
@@ -2254,7 +2320,7 @@ function chkItemsHtml(crew, day) {
   items.slice().sort(function (a, b) { return (a.done - b.done) || ((a.at || '~') < (b.at || '~') ? -1 : 1); }).forEach(function (c) {
     var nw = !c._tmp && c.by !== S.user.name && c.at && c.at > news().t0 && isNew('k:' + c.id);
     h += '<label class="chk' + (c.done ? ' done' : '') + (c._tmp ? ' tmp' : '') + (nw ? ' isnew' : '') + '" data-fid="' + esc(c.id) + '"><input type="checkbox" data-act="chktog" data-id="' + esc(c.id) + '"' + (c.done ? ' checked' : '') + '>' +
-      '<span class="grow"><span class="t">' + esc(c.text) + (nw ? ' ' + NEW_PILL : '') + '</span><span class="tiny muted">' + esc(c.by) + (c._tmp ? ' · ⏳ zapisywanie…' : '') + (c.done && c.doneBy ? ' · zabrał(a) ' + esc(c.doneBy) : '') + '</span></span>' +
+      '<span class="grow"><span class="t">' + esc(c.text) + (nw ? ' ' + NEW_PILL : '') + '</span><span class="tiny muted">' + esc(c.by) + (c._tmp ? ' · ⏳ zapisywanie…' : '') + (c.done && c.doneBy ? ' · zabrał ' + esc(c.doneBy) : '') + '</span></span>' +
       (c.by === S.user.name || isAdmin() ? '<button class="link small muted" data-act="chkdel" data-id="' + esc(c.id) + '">usuń</button>' : '') + '</label>';
   });
   return h;
@@ -2416,7 +2482,8 @@ function prefetch() {
     idbPut('diary_' + KEY, S.diary);
     var p = S.route.split('/');
     if ((p[0] === 'zl' || p[0] === 'ld') && p[1]) rerenderDetail();
-    if (p[0] === 'jutro') rerender();
+    if (p[0] === 'jutro' || (p[0] === 'zl' && !p[1])) rerender();
+    else if (S.user && !S.denied) renderNav();                      // liczniki nowych wpisów na zakładkach
   }).catch(function () {}).then(function () { S.prefetching = false; });
 }
 
@@ -2477,7 +2544,7 @@ function renderUsers() {
     var link = u.app || u.link;
     h += '<div class="card"><div class="row"><div class="grow"><b>' + esc(u.name) + '</b> <span class="pill ' + (u.role === 'admin' ? 'st-planowane' : '') + '">' + (u.role === 'admin' ? 'admin' : 'pracownik') + '</span>' +
       (u.active ? '' : ' <span class="pill st-anulowane">wyłączony</span>') + '<div class="small muted">' + (u.ekipa ? '🚐 ' + esc(u.ekipa) + ' · ' : '') + (u.person ? 'harmonogram: ' + esc(u.person) + ' · ' : '') +
-      (u.seen ? 'ostatnio: ' + esc(u.seen) : 'jeszcze nie logował(a) się') + '</div></div><button class="btn sm" data-act="useredit" data-id="' + esc(u.id) + '">Edytuj</button></div>' +
+      (u.seen ? 'ostatnio: ' + esc(u.seen) : 'jeszcze się nie logował') + '</div></div><button class="btn sm" data-act="useredit" data-id="' + esc(u.id) + '">Edytuj</button></div>' +
       (u.active ? (link ? '<div class="copyfld" style="margin-top:8px"><input readonly value="' + esc(link) + '"><button class="btn sm" data-act="copy" data-v="' + esc(link) + '">Kopiuj</button></div>'
         : '<div class="small" style="color:var(--bad);margin-top:6px">Brak adresu aplikacji – wpisz go w Ustawieniach.</div>') : '') + '</div>';
   });
