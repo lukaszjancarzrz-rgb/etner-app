@@ -1,6 +1,6 @@
 // ETNER – service worker: aplikacja otwiera się od razu (także bez zasięgu) z plików zapisanych w telefonie,
 // a nowa wersja pobiera się w tle i działa od następnego otwarcia. Dane i zapisy idą do Apps Script (nie są tu buforowane).
-var CACHE = 'etner-test-06584cefd5';
+var CACHE = 'etner-test-963055e464';
 var FILES = ["./", "index.html", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener('install', function (e) {
@@ -39,7 +39,8 @@ self.addEventListener('fetch', function (e) {
 });
 
 // ---------------------------------------------------------------- powiadomienia push
-// Serwer wysyła „pusty” push (bez treści); treść pobieramy z apiPushInbox tym samym osobistym kodem co aplikacja.
+// Treść przychodzi w samym powiadomieniu (szyfrowana kluczem tego telefonu). Starsze subskrypcje (bez kluczy) dostają
+// „pusty” push – wtedy treść pobieramy z apiPushInbox tym samym osobistym kodem co aplikacja.
 function swCfg() {
   return new Promise(function (res) {
     try {
@@ -56,7 +57,10 @@ function swCfg() {
   });
 }
 self.addEventListener('push', function (e) {
+  var data = null;
+  try { data = e.data ? e.data.json() : null; } catch (x) { data = null; }   // treść w samym powiadomieniu (szyfrowana)
   e.waitUntil(swCfg().then(function (cfg) {
+    if (data && data.title) { data.base = cfg && cfg.base; return data; }
     if (!cfg || !cfg.api) return null;
     return fetch(cfg.api, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                             body: JSON.stringify({ fn: 'apiPushInbox', token: cfg.token, args: [] }) })

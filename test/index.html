@@ -273,6 +273,18 @@ div.drf{color:var(--text)}
 .crewleg{display:flex;gap:16px;flex-wrap:wrap;margin:-4px 0 10px;color:var(--text)}
 .crewleg .cl{display:inline-flex;align-items:center;gap:6px}
 .crewleg i{display:inline-block;width:4px;height:16px;border-radius:2px}
+/* „nowe” i przejście do zmiany z powiadomienia */
+.pill.newp{background:#16A34A;color:#fff;font-size:10.5px;padding:1px 7px;text-transform:uppercase;letter-spacing:.3px;vertical-align:1px}
+.entry.isnew,.item.isnew,label.chk.isnew{box-shadow:inset 3px 0 0 #16A34A;background:#F0FDF4}
+.entry.isnew{padding-left:10px;padding-right:8px;margin:0 -8px 0 -10px;border-radius:6px}
+.ent.isnew{background:#F0FDF4;border-left:3px solid #16A34A;padding-left:6px;margin-left:-6px;border-radius:4px}
+.hgrid td.isnew{background:#F0FDF4}
+.newsbar{border:1.5px solid #86EFAC;background:#F0FDF4}
+.newsbar .nrow{display:block;text-align:left;padding:5px 0;font-size:14px;color:var(--text);text-decoration:none}
+.newsbar .nrow .dd{display:inline-block;min-width:70px;color:var(--muted)}
+.newsbar .nrow s{color:var(--muted)}
+[data-fid].hl{animation:hlpulse 2.4s ease-out 1}
+[data-fid].fcs{outline:2px solid #16A34A;outline-offset:2px;border-radius:6px}
 </style>
 
 </head>
@@ -473,6 +485,7 @@ function applyData(d) {
   if (!S.areas.K) S.areas.K = [];
   S._jm = null;
   S.outbox.forEach(function (op) { applyOp(op); });
+  newsSched(false);
   if (FS.on) fsApplyAll();
   setTimeout(function () { fsStart(S.fb); }, 0);
 }
@@ -754,7 +767,7 @@ function fsApplyAll() {
   S.buys = fsVals('buys').filter(function (d) { return !d.del && !(d.bought && d.boughtAt && d.boughtAt < old); }).map(function (d) {
     return { id: d.id, co: d.co, sklep: d.sklep || '', grupa: d.grupa || '', status: d.bought ? kup : (d.status && norm(d.status) !== 'kupione' ? d.status : first),
              kwota: d.kwota === null || d.kwota === undefined ? '' : d.kwota, lista: d.lista || '', uwagi: d.uwagi || '', by: d.by || '', byId: d.byId || '',
-             sec: '', arch: !!d.bought, zamk: d.boughtAt || '' };
+             sec: '', arch: !!d.bought, zamk: d.boughtAt || '', at: d.at || '', boughtBy: d.boughtBy || '' };
   });
   var byObj = {};
   fsVals('diary').concat(fsVals('diaryL')).forEach(function (d) {
@@ -1108,6 +1121,11 @@ function navReplace(route) {
 }
 function go(route, noPush) {
   if (S.sheetOpen) closeSheet();
+  newsCommit();                                                  // „nowe” na opuszczanym ekranie – już widziane
+  S.fcs = null;
+  var fm = /^(.*)~([^~\/]+)$/.exec(route || '');                // z powiadomienia: prosto do zmiany (wpis, pozycja)
+  if (fm) { route = fm[1]; S.focus = { id: fm[2], until: Date.now() + 20000 }; focusPrep(route, fm[2]); }
+  if (route.split('/')[0] !== 'jutro') S.jutroFix = null;
   var hd = /^harm\/(\d{4}-\d{2}-\d{2})$/.exec(route || '');          // z powiadomienia: harmonogram na konkretny dzień
   if (hd) { route = 'harm'; S.week = monday(hd[1]); S.mon = monthStart(hd[1]); S.hlDay = hd[1]; }
   var toHarm = !hd && route === 'harm' && S.route.split('/')[0] !== 'harm';
@@ -1150,6 +1168,10 @@ function setTop(title, showBack, actions) {
 function render() {
   if (!S.user || S.denied) return;
   renderNav();
+  renderRoute_();
+  applyFocus();
+}
+function renderRoute_() {
   var p = S.route.split('/');
   if (p[0] === 'zl') return renderJobs(p[1]);
   if (p[0] === 'jutro') return renderJutro();
@@ -1174,7 +1196,91 @@ function rerender() {
   window.scrollTo(0, y);
   var pl2 = document.querySelector('.pane-l'); if (pl2) pl2.scrollTop = pls;
 }
-function rerenderDetail() { if (!S.sheetOpen) keepInputs(redrawDetail_); }
+function rerenderDetail() { if (!S.sheetOpen) { keepInputs(redrawDetail_); applyFocus(); } }
+
+// ------------------------------------------------------------------------------------------------ „nowe” i przejście do zmiany
+// Zmiany zrobione przez innych (wpis w dzienniku, rzecz na liście „do zabrania”, zakupy, zmiana w Twoim harmonogramie)
+// mają znaczek „nowe”, dopóki ich nie zobaczysz – znika po wyjściu z ekranu, na którym był widoczny.
+// Klik w powiadomienie (adres „…~id”) otwiera ekran z tą zmianą, przewija do niej i ją podświetla.
+var NEW_PILL = '<span class="pill newp">nowe</span>';
+var NEWS = null;
+function news() {
+  if (NEWS) return NEWS;
+  NEWS = lsGet('news_' + KEY);
+  if (!NEWS || !NEWS.t0) { NEWS = { t0: stampNow(), seen: {}, hs: null, hsc: null, hn: {} }; lsSet('news_' + KEY, NEWS); }
+  NEWS.hn = NEWS.hn || {}; NEWS.seen = NEWS.seen || {};
+  return NEWS;
+}
+function newsSave() {
+  var ks = Object.keys(NEWS.seen);
+  if (ks.length > 800) ks.slice(0, ks.length - 600).forEach(function (k) { delete NEWS.seen[k]; });
+  lsSet('news_' + KEY, NEWS);
+}
+/** Czy pokazać „nowe” (i zapamiętać, że zostało pokazane na tym ekranie). */
+function isNew(k) {
+  if (news().seen[k]) return false;
+  (S.newsShown = S.newsShown || {})[k] = 1;
+  return true;
+}
+/** Wyjście z ekranu: to, co było oznaczone „nowe”, jest już widziane. */
+function newsCommit() {
+  var ks = Object.keys(S.newsShown || {});
+  if (!ks.length) return;
+  var n = news();
+  ks.forEach(function (k) { if (k.indexOf('h:') === 0) delete n.hn[k.slice(2)]; else n.seen[k] = 1; });
+  S.newsShown = {};
+  newsSave();
+}
+/** Twoja kolumna w harmonogramie: co zmieniło się od ostatnich danych (silent – bez znaczków, np. po własnym zatwierdzeniu). */
+function newsSched(silent) {
+  var mc = myCol();
+  if (!mc || !S.schedule || !S.schedule.days) return;
+  var n = news(), today = S.today || todayLocal(), cur = {};
+  S.schedule.days.forEach(function (d) { if (d.d >= today) cur[d.d] = d.cells[mc] || ''; });
+  if (!silent && n.hs && n.hsc === mc) Object.keys(cur).forEach(function (ds) {
+    if (!(ds in n.hs)) return;
+    var was = n.hn[ds] ? n.hn[ds].o : n.hs[ds];
+    if (was !== cur[ds]) n.hn[ds] = { o: was, n: cur[ds] }; else delete n.hn[ds];
+  });
+  Object.keys(n.hn).forEach(function (ds) { if (ds < today) delete n.hn[ds]; });
+  n.hs = cur; n.hsc = mc;
+  newsSave();
+}
+function schedNewOf(ds) { var x = news().hn[ds]; if (x) isNew('h:' + ds); return x || null; }
+/** Pasek nad harmonogramem: Twoje zmienione dni (klik = ten dzień). */
+function schedNewsBar() {
+  var hn = news().hn, ds = Object.keys(hn).sort();
+  if (!ds.length || !myCol()) return '';
+  return '<div class="card newsbar"><b>🆕 Zmiany w Twoim harmonogramie</b>' + ds.slice(0, 8).map(function (d) {
+    var x = hn[d], dt = pd(d);
+    return '<button class="link nrow" data-go="harm/' + d + '"><span class="dd">' + DOW[dt.getDay()] + ' ' + fds(d) + '</span> ' +
+      (x.o ? '<s>' + esc(x.o) + '</s> → ' : '') + (x.n ? '<b>' + esc(x.n) + '</b>' : '<i>bez wpisu</i>') + '</button>';
+  }).join('') + (ds.length > 8 ? '<div class="tiny muted">… i jeszcze ' + (ds.length - 8) + '</div>' : '') + '</div>';
+}
+/** Przed pokazaniem ekranu z powiadomienia: właściwa ekipa i dzień listy, rozwinięte „Kupione”. */
+function focusPrep(route, id) {
+  var base = route.split('/')[0];
+  if (base === 'jutro') { var c = byId(S.checks || [], id); S.jutroFix = c ? { crew: c.crew, day: c.day } : null; }
+  if (base === 'zakupy') { var b = byId(S.buys || [], id); if (b && b.arch) S.buyShowDone = true; }
+}
+function fidEl(id) { return document.querySelector('#view [data-fid="' + String(id).replace(/["\\]/g, '') + '"]'); }
+/** Przewinięcie do zmiany z powiadomienia i podświetlenie (zostaje zaznaczona do wyjścia z ekranu, także po odświeżeniu). */
+function applyFocus() {
+  if (S.fcs) { var e0 = fidEl(S.fcs); if (e0) e0.classList.add('fcs'); }
+  var f = S.focus;
+  if (!f) return;
+  if (Date.now() > f.until) { S.focus = null; return; }
+  var el = fidEl(f.id), base = S.route.split('/')[0];
+  if (!el && base === 'jutro' && !S.jutroFix && byId(S.checks || [], f.id)) { focusPrep('jutro', f.id); renderJutro(); el = fidEl(f.id); }
+  if (!el && base === 'zakupy' && !S.buyShowDone && byId(S.buys || [], f.id)) { focusPrep('zakupy', f.id); renderBuys(); el = fidEl(f.id); }
+  if (!el) return;                                            // dane jeszcze się wczytują – spróbuję po następnym odświeżeniu
+  S.focus = null; S.fcs = f.id;
+  setTimeout(function () {
+    var x = fidEl(f.id) || el;
+    x.scrollIntoView({ block: 'center' });
+    x.classList.add('hl', 'fcs');
+  }, 30);
+}
 
 // ------------------------------------------------------------------------------------------------ harmonogram
 var CODES = { 'urlop': 'c-urlop', 'l4': 'c-l4', 'wolne': 'c-wolne', 'bezpłatny': 'c-bezplatny', 'na żądanie': 'c-zadanie',
@@ -1292,6 +1398,7 @@ function renderHarm() {
   if (S.schedule.from && (to < S.schedule.from || from > S.schedule.to))
     h += '<div class="card small muted">Harmonogram w arkuszu obejmuje ' + fd(S.schedule.from) + ' – ' + fd(S.schedule.to) + '.</div>';
   if (isAdmin()) h += draftBar();
+  h += schedNewsBar();
   if (midW()) h += crewLegend();
   var dm = dayMap(), persons = S.schedule.persons.filter(function (p) { return !S.onlyMe || p.c === mc; });
   var dmap = isAdmin() ? draftMap() : null;
@@ -1348,6 +1455,7 @@ function schedApprove() {
   if (!list.length) return;
   if (S.sheetOpen) closeSheet();
   enqueue('sappr', { items: list.map(function (x) { return { k: x.k, n: x.n }; }) });
+  newsSched(true);
   render();
   toast('Zatwierdzono – wysyłam powiadomienia…');
 }
@@ -1357,6 +1465,7 @@ function schedDiscard(keys) {
   render();
 }
 function harmGrid(from, len, dm, persons, dmap) {
+  var mc0 = myCol();
   var h = '<div class="hgrid-wrap"><table class="hgrid"><thead><tr><th class="d">Dzień</th>' +
     persons.map(function (p) {
       var l = crewLeads().filter(function (x) { return x.c === p.c; })[0];
@@ -1370,12 +1479,13 @@ function harmGrid(from, len, dm, persons, dmap) {
       (d.info && d.wd === 2 ? '<div class="tiny">' + esc(d.info) + '</div>' : '') + '</td>';
     var lt = dayLeads(d, dmap);
     persons.forEach(function (p) {
-      var v = cellOf(d, p.c, dmap), t = v.t, cr = cellCrews(t, lt);
+      var v = cellOf(d, p.c, dmap), t = v.t, cr = cellCrews(t, lt), nw = p.c === mc0 ? schedNewOf(ds) : null;
       var tip = (cr.length ? cr.map(function (l) { return l.crew; }).join(' + ') : '') + (v.dr ? (cr.length ? ' · ' : '') + 'Do zatwierdzenia. Teraz: ' + (v.o || '(pusto)') : '');
-      h += '<td class="cell' + (v.dr ? ' drf' : '') + (cr.length ? ' crw' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
+      h += '<td class="cell' + (v.dr ? ' drf' : '') + (cr.length ? ' crw' : '') + (nw ? ' isnew' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + p.c + '"' +
         (cr.length ? ' style="box-shadow:inset 4px 0 0 ' + cr[0].fg + (cr[1] ? ',inset 8px 0 0 ' + cr[1].fg : '') + '"' : '') +
         (tip ? ' title="' + esc(tip) + '"' : '') + '>' +
-        (t ? chipHtml(t, !isAdmin()) : (v.dr && v.o ? '<span class="chip c-del">' + esc(v.o) + '</span>' : '')) + '</td>';
+        (t ? chipHtml(t, !isAdmin()) : (v.dr && v.o ? '<span class="chip c-del">' + esc(v.o) + '</span>' : '')) +
+        (nw ? NEW_PILL + (nw.o ? '<div class="tiny muted">było: ' + esc(nw.o) + '</div>' : '') : '') + '</td>';
     });
     if (!S.onlyMe) { var u = cellOf(d, 13, dmap);
       h += '<td class="uw cell' + (u.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="13">' +
@@ -1393,6 +1503,7 @@ function chipHtml(t, link) {
   }).join(' ');
 }
 function harmCards(from, len, dm, persons, dmap) {
+  var mc0 = myCol();
   var h = '';
   for (var i = 0; i < len; i++) {
     var ds = addD(from, i), d = dm[ds] || { d: ds, cells: {}, wd: 1 }, dt = pd(ds);
@@ -1403,20 +1514,23 @@ function harmCards(from, len, dm, persons, dmap) {
       var k = (v.dr ? (v.t ? '+' : '-') : '') + norm(t);             // szkic osobno od zatwierdzonych wpisów
       if (!groups[k]) { groups[k] = { t: t, who: [], cols: [], dr: v.dr ? (v.t ? 'new' : 'del') : '' }; order.push(k); }
       groups[k].who.push(p.name); groups[k].cols.push(p.c);
+      if (p.c === mc0) groups[k].mine = true;
     });
-    var uwv = cellOf(d, 13, dmap), lt = dayLeads(d, dmap);
+    var uwv = cellOf(d, 13, dmap), lt = dayLeads(d, dmap), myNew = mc0 ? schedNewOf(ds) : null;
     var cls = 'day' + (d.wd === 0 ? ' we' : '') + (d.wd === 2 ? ' hol' : '') + (ds === S.today ? ' today' : '');
     h += '<div class="' + cls + '" data-day="' + ds + '"><div class="day-h"><span class="grow">' + DOWL[dt.getDay()] + ' ' + fds(ds) +
       (ds === S.today ? ' <span class="pill" style="background:var(--orange);color:#fff">dziś</span>' : '') +
       (d.wd === 2 && d.info ? ' <span class="tiny">' + esc(d.info) + '</span>' : '') + '</span>' +
       (isAdmin() ? '<button class="btn sm" data-act="hcell" data-d="' + ds + '" data-c="">+</button>' : '') + '</div>';
-    if (!order.length && !uwv.t && !uwv.dr) { h += (d.wd === 0 ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
+    if (myNew && !myNew.n) h += '<div class="day-b"><div class="ent isnew">' + NEW_PILL + ' <span class="small">Twój wpis usunięty (było: ' + esc(myNew.o) + ')</span></div></div>';
+    if (!order.length && !uwv.t && !uwv.dr) { h += (d.wd === 0 || myNew ? '' : '<div class="day-b small muted">brak wpisów</div>') + '</div>'; continue; }
     h += '<div class="day-b">';
     order.forEach(function (k) {
       var g = groups[k], js = g.dr === 'del' ? [] : cellJobs(g.t), cr = g.dr === 'del' ? [] : cellCrews(g.t, lt);
-      h += '<div class="ent' + (g.dr ? ' drf' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' +
+      var gn = g.mine && myNew && myNew.n && !g.dr;
+      h += '<div class="ent' + (g.dr ? ' drf' : '') + (gn ? ' isnew' : '') + '" data-act="hcell" data-d="' + ds + '" data-c="' + g.cols.join(',') + '"><span class="chips">' +
         (g.dr === 'del' ? '<span class="chip c-del">' + esc(g.t) + '</span>' : chipHtml(g.t, !isAdmin())) +
-        '</span><span class="who grow">' + esc(g.who.join(', ')) + (g.dr ? ' <span class="pill drfp">' + (g.dr === 'del' ? 'usunięte – do zatw.' : 'do zatwierdzenia') + '</span>' : '') +
+        '</span><span class="who grow">' + (gn ? NEW_PILL + ' ' : '') + esc(g.who.join(', ')) + (gn && myNew.o ? ' <span class="tiny">(było: ' + esc(myNew.o) + ')</span>' : '') + (g.dr ? ' <span class="pill drfp">' + (g.dr === 'del' ? 'usunięte – do zatw.' : 'do zatwierdzenia') + '</span>' : '') +
         js.map(function (j) { return '<br><span class="tiny">' + esc([j.klient, j.lok].filter(Boolean).join(' – ')) + '</span>'; }).join('') +
         (cr.length ? '<span class="crews">' + cr.map(crewPill).join(' ') + '</span>' : '') + '</span></div>';
     });
@@ -1626,7 +1740,9 @@ function diaryHtml(objId, title, ph) {
     '<span class="grow"></span><button class="btn sm pri" data-act="dsave" data-obj="' + esc(objId) + '">Zapisz wpis</button></div></div>';
   if (!diary.length) h += '<div class="small muted" style="margin-top:12px">' + (S.diary[objId] ? 'Brak wpisów.' : '<span class="spin sm"></span> wczytuję wpisy…') + '</div>';
   diary.forEach(function (e) {
-    h += '<div class="entry' + (e._tmp ? ' tmp' : '') + '"><div class="row small"><b>' + esc(e.author) + '</b><span class="muted">' + esc(e.when) + '</span>' +
+    var nw = !e._tmp && !e.mine && e.author !== S.user.name && e.when > news().t0 && isNew('d:' + e.id);
+    h += '<div class="entry' + (e._tmp ? ' tmp' : '') + (nw ? ' isnew' : '') + '" data-fid="' + esc(e.id) + '"><div class="row small"><b>' + esc(e.author) + '</b><span class="muted">' + esc(e.when) + '</span>' +
+      (nw ? NEW_PILL : '') +
       (e.obj !== objId ? '<span class="tag">etap wyceny ' + esc(e.obj) + '</span>' : '') +
       (e._tmp ? '<span class="wait">' + (e.st === 'wait' ? '📴 czeka na zasięg' : '⏳ ' + esc(e.prog || 'wysyłanie…')) + '</span>' : '') + '<span class="grow"></span>' +
       (!e._tmp && (e.mine || isAdmin()) ? '<button class="link small muted" data-act="ddel" data-id="' + esc(e.id) + '" data-obj="' + esc(e.obj) + '" data-view="' + esc(objId) + '">usuń</button>' : '') + '</div>' +
@@ -1719,7 +1835,7 @@ function keepInputs(fn) {
   fn();
   Object.keys(keep).forEach(function (k) { var e = $(k); if (e && !e.value) e.value = keep[k]; });
 }
-function redrawDetail() { keepInputs(redrawDetail_); }
+function redrawDetail() { keepInputs(redrawDetail_); applyFocus(); }
 function redrawDetail_() {
   var p = S.route.split('/');
   if (!p[1] || !$('detail')) return;
@@ -2037,6 +2153,12 @@ function toJobSave(id) {
 
 // ------------------------------------------------------------------------------------------------ na jutro (ekipa)
 /** Dzień listy: przed 12:00 – dziś, od 12:00 – następny dzień (dni wolne bez wpisów ekipy pomijane). */
+/** Ekipa i dzień pokazywane w „Na jutro” (z powiadomienia – dzień i ekipa tej pozycji). */
+function jutroCur() {
+  if (S.jutroFix) return S.jutroFix;
+  var crew = myCrew();
+  return { crew: crew, day: jutroDay(crew) };
+}
 function jutroDay(crew) {
   var today = S.today || todayLocal(), d = new Date().getHours() < 12 ? today : addD(today, 1), dm = dayMap(), cols = crewCols(crew);
   for (var i = 0; i < 7; i++) {
@@ -2083,7 +2205,7 @@ function loadTomorrow(ids) {
   }).catch(function (e) { if (!e.net) toast(e.message, true); }).then(function () { S.tomorrowLoading = false; });
 }
 function renderJutro() {
-  var crew = myCrew(), day = jutroDay(crew), dt = pd(day);
+  var jc = jutroCur(), crew = jc.crew, day = jc.day, dt = pd(day);
   setTop('Na ' + (day === S.today ? 'dziś' : (day === addD(S.today, 1) ? 'jutro' : DOWL[dt.getDay()])), false);
   var h = '';
   if (isAdmin()) {
@@ -2130,8 +2252,9 @@ function chkItemsHtml(crew, day) {
   var items = crewChecks(crew, day), h = '';
   if (!items.length) return '<div class="small muted">Lista pusta – dopisz rzeczy nietypowe, które trzeba zabrać.</div>';
   items.slice().sort(function (a, b) { return (a.done - b.done) || ((a.at || '~') < (b.at || '~') ? -1 : 1); }).forEach(function (c) {
-    h += '<label class="chk' + (c.done ? ' done' : '') + (c._tmp ? ' tmp' : '') + '"><input type="checkbox" data-act="chktog" data-id="' + esc(c.id) + '"' + (c.done ? ' checked' : '') + '>' +
-      '<span class="grow"><span class="t">' + esc(c.text) + '</span><span class="tiny muted">' + esc(c.by) + (c._tmp ? ' · ⏳ zapisywanie…' : '') + (c.done && c.doneBy ? ' · zabrał(a) ' + esc(c.doneBy) : '') + '</span></span>' +
+    var nw = !c._tmp && c.by !== S.user.name && c.at && c.at > news().t0 && isNew('k:' + c.id);
+    h += '<label class="chk' + (c.done ? ' done' : '') + (c._tmp ? ' tmp' : '') + (nw ? ' isnew' : '') + '" data-fid="' + esc(c.id) + '"><input type="checkbox" data-act="chktog" data-id="' + esc(c.id) + '"' + (c.done ? ' checked' : '') + '>' +
+      '<span class="grow"><span class="t">' + esc(c.text) + (nw ? ' ' + NEW_PILL : '') + '</span><span class="tiny muted">' + esc(c.by) + (c._tmp ? ' · ⏳ zapisywanie…' : '') + (c.done && c.doneBy ? ' · zabrał(a) ' + esc(c.doneBy) : '') + '</span></span>' +
       (c.by === S.user.name || isAdmin() ? '<button class="link small muted" data-act="chkdel" data-id="' + esc(c.id) + '">usuń</button>' : '') + '</label>';
   });
   return h;
@@ -2139,7 +2262,7 @@ function chkItemsHtml(crew, day) {
 /** Odświeżenie samej listy, gdy ktoś pisze w polu „dodaj” (klawiatura zostaje otwarta). */
 function refreshAddLists() {
   if (S.route === 'jutro' && $('chk_items')) {
-    var crew = myCrew(), day = jutroDay(crew);
+    var jc = jutroCur(), crew = jc.crew, day = jc.day;
     $('chk_items').innerHTML = chkItemsHtml(crew, day); $('chk_cnt').textContent = chkCount(crew, day);
     renderNav(); return true;
   }
@@ -2149,9 +2272,9 @@ function refreshAddLists() {
 function checkAdd() {
   var t = $('chk_text'), text = t ? t.value.trim() : '';
   if (!text) return toast('Wpisz, co trzeba zabrać.', true);
-  var crew = myCrew(); if (!crew) return toast('Brak ekipy.', true);
+  var jc = jutroCur(), crew = jc.crew; if (!crew) return toast('Brak ekipy.', true);
   t.value = '';
-  enqueue('chk_add', { crew: crew, day: jutroDay(crew), text: text, tmpId: 'tmp' + uid() });
+  enqueue('chk_add', { crew: crew, day: jc.day, text: text, tmpId: 'tmp' + uid() });
   if (!refreshAddLists()) { renderJutro(); renderNav(); }
   t.focus();
 }
@@ -2165,7 +2288,9 @@ function checkDelete(id, ok) {
 function buyCard(b) {
   var adm = isAdmin(), mine = b.by === S.user.name, st = norm(b.status);
   var meta = [b.sklep, b.grupa, b.kwota !== '' && b.kwota !== undefined ? money(b.kwota) : ''].filter(Boolean).join(' · ');
-  var h = '<div class="item buy' + (b._tmp ? ' tmp' : '') + (b.arch ? ' done' : '') + '"><div class="row"><span class="grow b">' + esc(b.co) + '</span>' +
+  var nw = !b._tmp && (b.arch ? mine && b.boughtBy !== S.user.name && b.zamk && b.zamk >= news().t0.slice(0, 10) && isNew('bd:' + b.id)
+                              : !mine && b.at && b.at > news().t0 && isNew('b:' + b.id));
+  var h = '<div class="item buy' + (b._tmp ? ' tmp' : '') + (b.arch ? ' done' : '') + (nw ? ' isnew' : '') + '" data-fid="' + esc(b.id) + '"><div class="row"><span class="grow b">' + esc(b.co) + (nw ? ' ' + NEW_PILL : '') + '</span>' +
     (b.status ? '<span class="pill ' + stCls(b.status) + '">' + esc(b.status) + '</span>' : '') + '</div>' +
     (b.uwagi ? '<div class="small" style="margin-top:4px">' + esc(b.uwagi) + '</div>' : '') +
     '<div class="meta">' + (b.by ? '<span>✍️ ' + esc(b.by) + '</span>' : (b.lista ? '<span>' + esc(b.lista) + '</span>' : '')) + (meta ? '<span>' + esc(meta) + '</span>' : '') +
@@ -2263,7 +2388,7 @@ function pushSubscribe(silent) {
     });
   }).then(function (sub) {
     return api('apiPushSubscribe', sub.toJSON(), (navigator.userAgent || '').slice(0, 100));
-  }).then(function () { lsSet('push_ok_' + KEY, Date.now()); if (!silent) { toast('Powiadomienia włączone.'); rerender(); } });
+  }).then(function () { lsSet('push_ok_' + KEY, Date.now()); lsSet('push_v2_' + KEY, 1); if (!silent) { toast('Powiadomienia włączone.'); rerender(); } });
 }
 function pushEnable() {
   if (!pushSupported()) return toast('Ten telefon nie obsługuje powiadomień w tej aplikacji.', true);
@@ -2275,7 +2400,7 @@ function pushEnable() {
 function pushKeepAlive() {
   if (!pushSupported() || Notification.permission !== 'granted') return;
   var last = lsGet('push_ok_' + KEY) || 0;
-  if (Date.now() - last < 20 * 3600000) return;
+  if (Date.now() - last < 20 * 3600000 && lsGet('push_v2_' + KEY)) return;     // v2: serwer zapisuje klucze (treść w powiadomieniu)
   pushSubscribe(true).catch(function () {});
 }
 
@@ -2513,7 +2638,7 @@ var ACT = {
   fbsave: function () { fbSave(false); }, fboff: function () { ask('Wyłączyć bazę na żywo? Aplikacja wróci do pracy przez arkusz.', function () { fbSave(true); }, 'danger'); },
   pushon: function () { pushEnable(); }, pushtest: function () { api('apiPushTest').then(function (r) { toast(r.sent ? 'Wysłano próbne powiadomienie.' : 'Brak zarejestrowanych telefonów.', !r.sent); }).catch(fail); },
   chkadd: function () { checkAdd(); }, chktog: function (el) { checkToggle(el.getAttribute('data-id'), el.checked); },
-  chkdel: function (el) { checkDelete(el.getAttribute('data-id')); }, jcrew: function (el) { S.jutroCrew = el.getAttribute('data-c'); S.tomorrowAt = 0; renderJutro(); },
+  chkdel: function (el) { checkDelete(el.getAttribute('data-id')); }, jcrew: function (el) { S.jutroCrew = el.getAttribute('data-c'); S.jutroFix = null; S.tomorrowAt = 0; renderJutro(); },
   buyadd: function () { buyAdd(); }, buyset: function (el) { buySet(el.getAttribute('data-id'), { status: el.getAttribute('data-s') }); },
   buydel: function (el) { buyDelete(el.getAttribute('data-id')); }, buyedit: function (el) { buyEdit(el.getAttribute('data-id')); },
   buysave: function (el) { buyEditSave(el.getAttribute('data-id')); }, buydone: function () { S.buyShowDone = !S.buyShowDone; renderBuys(); }
@@ -2545,7 +2670,8 @@ window.addEventListener('resize', function () {
 window.addEventListener('online', function () { S.offline = false; Q.fail = 0; badge(); pump(); sync(); });
 window.addEventListener('offline', function () { S.offline = true; badge(); });
 document.addEventListener('visibilitychange', function () {
-  if (document.hidden || !S.user) return;
+  if (document.hidden) { if (S.user) newsCommit(); return; }
+  if (!S.user) return;
   if (S.lastSync && Date.now() - S.lastSync > 15000) sync();
   pump();
 });
