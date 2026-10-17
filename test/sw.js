@@ -1,10 +1,12 @@
 // ETNER – service worker: aplikacja otwiera się od razu (także bez zasięgu) z plików zapisanych w telefonie,
 // a nowa wersja pobiera się w tle i działa od następnego otwarcia. Dane i zapisy idą do Apps Script (nie są tu buforowane).
-var CACHE = 'etner-test-963055e464';
+var CACHE = 'etner-test-96eff6d2ed';
 var FILES = ["./", "index.html", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
+  e.waitUntil(caches.open(CACHE).then(function (c) {           // z serwera, z pominięciem pamięci przeglądarki (inaczej mogłaby dać starą wersję)
+    return c.addAll(FILES.map(function (f) { return new Request(f, { cache: 'reload' }); }));
+  }).then(function () { return self.skipWaiting(); }));
 });
 
 self.addEventListener('activate', function (e) {
@@ -27,7 +29,8 @@ self.addEventListener('fetch', function (e) {
   if (req.mode === 'navigate') {                         // strona: od razu z pamięci, w tle sprawdzam nowszą
     e.respondWith(caches.open(CACHE).then(function (c) {
       return c.match('index.html').then(function (hit) {
-        var net = fetch(req).then(function (r) { if (r && r.ok) c.put('index.html', r.clone()); return r; }).catch(function () { return hit; });
+        var net = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+          .then(function (r) { if (r && r.ok) c.put('index.html', r.clone()); return r; }).catch(function () { return hit; });
         return hit || net;
       });
     }));

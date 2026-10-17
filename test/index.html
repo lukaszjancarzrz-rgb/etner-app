@@ -2581,6 +2581,7 @@ function copy(v) {
   toast(ok ? 'Skopiowano link.' : 'Zaznacz link i skopiuj ręcznie.', !ok);
 }
 function reload() {
+  swUpdate(true);
   if (!FS.on) { S.diary = {}; S.diaryAt = {}; }
   S.pumbleMsgs = {};
   toast('Wczytuję dane z arkusza…');
@@ -2671,6 +2672,7 @@ window.addEventListener('online', function () { S.offline = false; Q.fail = 0; b
 window.addEventListener('offline', function () { S.offline = true; badge(); });
 document.addEventListener('visibilitychange', function () {
   if (document.hidden) { if (S.user) newsCommit(); return; }
+  swUpdate(false);
   if (!S.user) return;
   if (S.lastSync && Date.now() - S.lastSync > 15000) sync();
   pump();
@@ -2714,11 +2716,19 @@ ACT.savelink = function () {
   lsSet('token', m[1]);
   location.replace(location.pathname + '?u=' + m[1]);
 };
+/** Sprawdzenie, czy jest nowa wersja aplikacji (przy otwarciu i po powrocie do aplikacji – telefon często tylko „wybudza”
+ *  aplikację z tła, bez ponownego wczytania strony, więc sam by nie sprawdził). Nowa wersja = automatyczne przeładowanie. */
+function swUpdate(force) {
+  if (MODE !== 'pwa' || !('serviceWorker' in navigator)) return;
+  if (!force && Date.now() - (swUpdate.at || 0) < 10 * 60000) return;
+  swUpdate.at = Date.now();
+  try { navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update().catch(function () {}); }).catch(function () {}); } catch (e) {}
+}
 function registerSW() {
   if (MODE !== 'pwa' || !('serviceWorker' in navigator)) return;
   try {
     var had = !!navigator.serviceWorker.controller;
-    navigator.serviceWorker.register('sw.js').catch(function () {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function () { swUpdate(true); }).catch(function () {});
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!had) return;                                     // pierwsza instalacja – nic nie przeładowuję
       if (!S.outbox.length && !S.sheetOpen && !Q.running) location.reload();
