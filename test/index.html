@@ -303,6 +303,7 @@ div.drf{color:var(--text)}
 .hgrid td.me{background:#F2F6FF}
 .hgrid tr.today td.me{background:#FFEFD9}
 .hgrid td.me.isnew{background:#F0FDF4}
+.pill.nodays{background:#FEF3C7;color:#92400E;font-size:11px}
 </style>
 
 </head>
@@ -1677,13 +1678,17 @@ function jobsFiltered() {
     return (a.arch - b.arch) || (terminIdx(a.termin) - terminIdx(b.termin)) || ((a.od || '9999') < (b.od || '9999') ? -1 : ((a.od || '9999') > (b.od || '9999') ? 1 : 0)) || (a.o - b.o);
   });
 }
+/** Aktualne zlecenie bez żadnego dnia w harmonogramie – znacznik na liście i w karcie zlecenia. */
+function noDays(j) { return !j._tmp && !j.arch && jobTab(j) === 'akt' && !j.dni; }
+var NODAYS_PILL = '<span class="pill nodays" title="Zlecenie nie ma jeszcze dni w harmonogramie">📅 brak w harmonogramie</span>';
 function jobCard(j, sel) {
   var nn = j._tmp ? 0 : diaryNewCount(j.id);
   var dates = j.od ? (j.od === j.do || !j.do ? fds(j.od) : fds(j.od) + '–' + fds(j.do)) : '';
   return '<div class="item' + (sel ? ' sel' : '') + (j._tmp ? ' tmp' : '') + '" data-go="zl/' + esc(j.id) + '"><div class="row"><span class="kat ' + katCls(j.kat) + '">' + esc(j.kat || '–') +
     '</span><span class="grow b ell">' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.zakres || j.id) + '</span>' +
     (j.status ? '<span class="pill ' + stCls(j.status) + '">' + esc(j.status) + '</span>' : '') + '</div>' +
-    (nn ? '<div class="newline"><span class="pill newp">' + nn + ' ' + plural(nn, 'nowy wpis', 'nowe wpisy', 'nowych wpisów') + '</span></div>' : '') +
+    (nn || noDays(j) ? '<div class="newline">' + (nn ? '<span class="pill newp">' + nn + ' ' + plural(nn, 'nowy wpis', 'nowe wpisy', 'nowych wpisów') + '</span> ' : '') +
+      (noDays(j) ? NODAYS_PILL : '') + '</div>' : '') +
     (j.zakres ? '<div class="small clamp2" style="margin-top:4px">' + esc(j.zakres) + '</div>' : '') +
     '<div class="meta">' + (dates ? '<span>📅 ' + dates + (j.dni ? ' · ' + fmtDni(j.dni) + ' dni w harm.' : '') + '</span>' : (j.termin ? '<span>🗓 ' + esc(j.termin) + '</span>' : '')) +
     (j.ekipa ? '<span>👷 ' + esc(j.ekipa) + '</span>' : '') + (j.n ? '<span>📝 ' + j.n + '</span>' : '') +
@@ -1753,6 +1758,7 @@ function drawJob(j) {
   var h = '<div class="card"><div class="row small muted"><span>' + (tmp ? '⏳ zapisywanie…' : esc(j.id)) + '</span>' + (j.kat ? '<span class="kat ' + katCls(j.kat) + '">' + esc(j.kat) + '</span><span>' + esc(katName(j.kat)) + '</span>' : '') +
     '<span class="grow"></span>' + (j.status ? '<span class="pill ' + stCls(j.status) + '">' + esc(j.status) + '</span>' : '') + '</div>' +
     '<h2>' + esc([j.klient, j.lok].filter(Boolean).join(' – ') || j.zakres) + '</h2>' +
+    (noDays(j) ? '<div class="newline" style="margin:-4px 0 8px">' + NODAYS_PILL + '</div>' : '') +
     contactHtml(j) +
     '<div class="btns" style="margin-top:10px">' +
     (j.ch ? '<a class="btn sm" target="_blank" rel="noopener" href="' + esc(pumbleHref(j.ch)) + '">💬 Pumble</a>' : '') +
